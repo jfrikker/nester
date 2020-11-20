@@ -19,7 +19,6 @@ import Data.Binary.Get (
   )
 import qualified Data.ByteString as BS
 import Data.Foldable (for_)
-import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust)
 import Data.Function ((&))
 import qualified Data.Text.Lazy.IO as TIO
@@ -43,7 +42,7 @@ main = do
   let addressSpace = mapper0 $ prgRom file
   print $ resetAddress addressSpace
   -- let instructions = take 40 $ readInstructions (resetAddress addressSpace) addressSpace
-  let instructions = Map.elems $ functionBody (resetAddress addressSpace) addressSpace
+  let instructions = functionBody 0x800d addressSpace
   for_ instructions $ putStrLn . toAssembly
   TIO.putStrLn $ ppllvm $ toIRNes addressSpace
   return ()

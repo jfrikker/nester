@@ -4,6 +4,7 @@ module Assembly (
   Instruction(..),
   Opcode(..),
   functionBody,
+  localBranch,
   nextAddr,
   offset,
   readInstruction,

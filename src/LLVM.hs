@@ -6,6 +6,7 @@ module LLVM (
 import AddressSpace(AddressSpace, resetAddress)
 import qualified Assembly as I
 import Control.Monad (forM_)
+import Data.Maybe (fromJust)
 import Data.Word (Word8, Word16)
 import LLVM.AST hiding (function)
 import qualified LLVM.AST.Constant as C
@@ -94,9 +95,22 @@ getMemAddr state = do
 
 setMemAddr :: Operand -> Operand -> IRBuilder ()
 setMemAddr state addr = do
-  addr <- emitInstr (ptr i16) $ GetElementPtr True state [ConstantOperand $ C.Int 32 0,
+  addr' <- emitInstr (ptr i16) $ GetElementPtr True state [ConstantOperand $ C.Int 32 0,
             ConstantOperand $ C.Int 32 2] []
-  store addr 0 addr
+  store addr' 0 addr
+
+getStoreMemValue :: Operand -> IRBuilder Operand
+getStoreMemValue state = do
+  addr <- emitInstr (ptr i8) $ GetElementPtr True state [ConstantOperand $ C.Int 32 0,
+            ConstantOperand $ C.Int 32 3] []
+  val <- load addr 0
+  return val
+
+setStoreMemValue :: Operand -> Operand -> IRBuilder ()
+setStoreMemValue state addr = do
+  addr' <- emitInstr (ptr i8) $ GetElementPtr True state [ConstantOperand $ C.Int 32 0,
+            ConstantOperand $ C.Int 32 3] []
+  store addr' 0 addr
 
 getMemValue :: Operand -> Operand -> IRBuilder Operand
 getMemValue state addr = do
@@ -142,7 +156,7 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
           resumeRead state ramMemVal
           elseRam <- block `named` "elseRam"
           condLow <- icmp P.ULT addr $ literalAddr 0x2000
-          condBr condLow ifLow end
+          condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
           readMem state ifLowLoc
@@ -150,9 +164,9 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
           condPpu <- icmp P.ULT addr $ literalAddr 0x4000
           condBr condPpu ifPpu elsePpu
           ifPpu <- block `named` "ifPpu"
-          ppuLocTemp <- sub addr $ literalAddr 0x4000
+          ppuLocTemp <- sub addr $ literalAddr 0x2000
           ppuLocTemp2 <- urem ppuLocTemp $ literalAddr 0x100
-          ppuLoc <- add ppuLocTemp2 $ literalAddr 0x4000
+          ppuLoc <- add ppuLocTemp2 $ literalAddr 0x2000
           setOperation state $ literal 0
           setMemAddr state ppuLoc
           retVoid
@@ -191,10 +205,41 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
         val = LocalReference i8 "val"
         body = execIRBuilder emptyIRBuilder $ mdo
           _entry <- block `named` "entry"
-          condZero <- icmp P.ULT addr $ literalAddr 0xff
-          condBr condZero ifZero end
+          condZero <- icmp P.ULT addr $ literalAddr 0x100
+          condBr condZero ifZero elseZero
           ifZero <- block `named` "ifZero"
           resume state
+          elseZero <- block `named` "elseZero"
+          condRam <- icmp P.ULT addr $ literalAddr 0x800
+          condBr condRam ifRam elseRam
+          ifRam <- block `named` "ifRam"
+          setMemValue state addr val
+          resume state
+          elseRam <- block `named` "elseRam"
+          condLow <- icmp P.ULT addr $ literalAddr 0x2000
+          condBr condLow ifLow elseLow
+          ifLow <- block `named` "ifLow"
+          ifLowLoc <- urem addr $ literalAddr 0x800
+          readMem state ifLowLoc
+          elseLow <- block `named` "elseLow"
+          condPpu <- icmp P.ULT addr $ literalAddr 0x4000
+          condBr condPpu ifPpu elsePpu
+          ifPpu <- block `named` "ifPpu"
+          ppuLocTemp <- sub addr $ literalAddr 0x2000
+          ppuLocTemp2 <- urem ppuLocTemp $ literalAddr 0x100
+          ppuLoc <- add ppuLocTemp2 $ literalAddr 0x2000
+          setOperation state $ literal 1
+          setMemAddr state ppuLoc
+          setStoreMemValue state val
+          retVoid
+          elsePpu <- block `named` "elsePpu"
+          condApu <- icmp P.ULT addr $ literalAddr 0x4020
+          condBr condApu ifApu end
+          ifApu <- block `named` "ifApu"
+          setOperation state $ literal 1
+          setMemAddr state addr
+          setStoreMemValue state val
+          retVoid
           end <- block `named` "end"
           setMemValue state addr val
           resume state
@@ -279,7 +324,8 @@ moduleDefs = [stateStructDef, resumeReadDef, resumeDef]
 toIRNes :: AddressSpace -> Module
 toIRNes mem = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, toIRFunction 0x8000 mem, toIRFunction 0x8007 mem]
+  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, toIRFunction 0x8000 mem, toIRFunction 0x8007 mem,
+    toIRFunction 0x800d mem]
   }
 
 toIRFunction :: Word16 -> AddressSpace -> Definition
@@ -292,7 +338,10 @@ toIRFunction addr mem = GlobalDefinition $ functionDefaults {
   }
   where state = LocalReference (ptr stateStruct) "state"
         insts = I.functionBody addr mem
-        body = execIRBuilder emptyIRBuilder $ forM_ insts $ toIR state
+        body = execIRBuilder emptyIRBuilder $ mdo
+          block `named` "entry"
+          br [fmt|lbl_{addr:04x}_0|]
+          forM_ insts $ toIR state
 
 regA :: Operand
 regA = literal 0
@@ -308,6 +357,9 @@ regS = literal 3
 
 regSp :: Operand
 regSp = literal 4
+
+regN :: Operand
+regN = literal 5
 
 toIR :: Operand -> I.Instruction -> IRBuilder ()
 toIR state inst = do
@@ -332,6 +384,12 @@ toIR_ state inst@(I.Implied _ I.TXS) = do
   x <- getRegValue state regX
   setRegValue state regS x
   brNext inst
+toIR_ state inst@(I.Relative _ I.BPL arg) = do
+  x <- getRegValue state regN
+  cond <- icmp P.EQ x $ literal 0
+  let next = I.nextAddr inst
+  let branch = fromJust $ I.localBranch inst
+  condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|] 
 
 literal :: Word8 -> Operand
 literal = ConstantOperand . C.Int 8 . fromIntegral
