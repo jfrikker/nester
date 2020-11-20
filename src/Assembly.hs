@@ -1,7 +1,11 @@
 {-# LANGUAGE DataKinds, QuasiQuotes, ScopedTypeVariables, TypeFamilies #-}
 
 module Assembly (
+  Instruction(..),
+  Opcode(..),
   functionBody,
+  nextAddr,
+  offset,
   readInstruction,
   readInstructions,
   toAssembly
@@ -148,9 +152,8 @@ nextAddr :: Instruction -> Word16
 nextAddr inst = offset inst + binLength inst
 
 followingAddr :: Instruction -> Maybe Word16
-followingAddr inst = case opcode inst of
-  JMP -> Nothing
-  otherwise -> Just $ nextAddr inst
+followingAddr (Absolute _ _ _) = Nothing
+followingAddr inst = Just $ nextAddr inst
 
 localBranch :: Instruction -> Maybe Word16
 localBranch (Relative off _ arg) = Just $ fromIntegral $ offset + 2 + (fromIntegral arg)
@@ -200,8 +203,8 @@ readInstructions :: Word16 -> AddressSpace -> [Instruction]
 readInstructions offset mem = inst : readInstructions (nextAddr inst) mem
   where inst = readInstruction offset mem
 
-functionBody :: Word16 -> AddressSpace -> Map Word16 Instruction
-functionBody off mem = functionBody_ mem off Map.empty
+functionBody :: Word16 -> AddressSpace -> [Instruction]
+functionBody off mem = Map.elems $ functionBody_ mem off Map.empty
 
 functionBody_ :: AddressSpace -> Word16 -> Map Word16 Instruction -> Map Word16 Instruction
 functionBody_ mem off acc
