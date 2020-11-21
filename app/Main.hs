@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+
 module Main where
 
 import AddressSpace (
@@ -7,7 +9,7 @@ import AddressSpace (
   resetAddress
   )
 import Assembly (
-  functionBody,
+  functionBodies,
   readInstructions,
   toAssembly
   )
@@ -19,6 +21,7 @@ import Data.Binary.Get (
   )
 import qualified Data.ByteString as BS
 import Data.Foldable (for_)
+import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Function ((&))
 import qualified Data.Text.Lazy.IO as TIO
@@ -27,6 +30,7 @@ import LLVM.Pretty (ppllvm)
 import Nes.File (
   NesFile(prgRom),
   getNesFile)
+import PyF (fmt)
 import System.Environment (getArgs)
 
 mapper0 :: BS.ByteString -> AddressSpace
@@ -42,7 +46,11 @@ main = do
   let addressSpace = mapper0 $ prgRom file
   print $ resetAddress addressSpace
   -- let instructions = take 40 $ readInstructions (resetAddress addressSpace) addressSpace
-  let instructions = functionBody 0x800d addressSpace
-  for_ instructions $ putStrLn . toAssembly
-  TIO.putStrLn $ ppllvm $ toIRNes addressSpace
+  -- let instructions = functionBody 0x90cc addressSpace
+  let functions = functionBodies (resetAddress addressSpace) addressSpace
+  for_ (Map.assocs functions) $ \(offset, body) -> do
+    putStrLn ""
+    putStrLn [fmt|{offset:04x}:|]
+    for_ body $ putStrLn . toAssembly
+  -- TIO.putStrLn $ ppllvm $ toIRNes addressSpace
   return ()
