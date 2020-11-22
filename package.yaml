@@ -27,6 +27,7 @@ dependencies:
 - containers
 - llvm-hs-pretty
 - llvm-hs-pure
+- monad-extras
 - mtl
 - PyF
 - text

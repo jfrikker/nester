@@ -185,22 +185,11 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
         addr = LocalReference i16 "addr"
         body = execIRBuilder emptyIRBuilder $ mdo
           _entry <- block `named` "entry"
-          condZero <- icmp P.ULT addr $ literalAddr 0x100
-          condBr condZero ifZero elseZero
-          ifZero <- block `named` "ifZero"
-          ret $ literal 0
-          elseZero <- block `named` "elseZero"
-          condRam <- icmp P.ULT addr $ literalAddr 0x800
-          condBr condRam ifRam elseRam
-          ifRam <- block `named` "ifRam"
-          ramMemVal <- getMemValue addr
-          ret ramMemVal
-          elseRam <- block `named` "elseRam"
           condLow <- icmp P.ULT addr $ literalAddr 0x2000
           condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
-          ifLowVal <- readMem callbacks ifLowLoc
+          ifLowVal <- getMemValue addr
           ret ifLowVal
           elseLow <- block `named` "elseLow"
           condPpu <- icmp P.ULT addr $ literalAddr 0x4000
@@ -254,22 +243,11 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
         val = LocalReference i8 "val"
         body = execIRBuilder emptyIRBuilder $ mdo
           _entry <- block `named` "entry"
-          condZero <- icmp P.ULT addr $ literalAddr 0x100
-          condBr condZero ifZero elseZero
-          ifZero <- block `named` "ifZero"
-          retVoid
-          elseZero <- block `named` "elseZero"
-          condRam <- icmp P.ULT addr $ literalAddr 0x800
-          condBr condRam ifRam elseRam
-          ifRam <- block `named` "ifRam"
-          setMemValue addr val
-          retVoid
-          elseRam <- block `named` "elseRam"
           condLow <- icmp P.ULT addr $ literalAddr 0x2000
           condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
-          writeMem callbacks ifLowLoc val
+          setMemValue addr val
           retVoid
           elseLow <- block `named` "elseLow"
           condPpu <- icmp P.ULT addr $ literalAddr 0x4000

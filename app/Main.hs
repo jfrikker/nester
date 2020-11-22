@@ -4,6 +4,8 @@ module Main where
 
 import AddressSpace (
   AddressSpace(AddressSpace, readStatic),
+  irqAddress,
+  nmiAddress,
   readAddress,
   readRom,
   resetAddress
@@ -45,10 +47,12 @@ main = do
   let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
   let addressSpace = mapper0 $ prgRom file
   print $ resetAddress addressSpace
+  print $ irqAddress addressSpace
+  print $ nmiAddress addressSpace
   -- let instructions = take 40 $ readInstructions (resetAddress addressSpace) addressSpace
   -- let instructions = functionBody 0x90cc addressSpace
-  let functions = functionBodies (resetAddress addressSpace) addressSpace
-  for_ (Map.assocs functions) $ \(offset, body) -> do
+  let functions = functionBodies [resetAddress addressSpace, irqAddress addressSpace, nmiAddress addressSpace] addressSpace
+  for_ functions $ \(offset, body) -> do
     putStrLn ""
     putStrLn [fmt|{offset:04x}:|]
     for_ body $ putStrLn . toAssembly
