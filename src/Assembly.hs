@@ -4,10 +4,13 @@ module Assembly (
   Instruction(..),
   Opcode(..),
   functionBody,
+  functionBodyWithParser,
   functionBodies,
-  localBranch,
+  functionBodiesWithParser,
   nextAddr,
+  followingAddrs,
   offset,
+  readAddress,
   readInstruction,
   readInstructions,
   toAssembly
@@ -19,6 +22,7 @@ import Data.Bytes.Signed (signed)
 import Data.Int(Int8)
 import Data.Foldable (foldrM)
 import Data.Functor ((<&>))
+import Data.List (intercalate)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Word(Word8, Word16)
@@ -81,7 +85,8 @@ data Opcode = ADC |
   TSX |
   TXA |
   TXS |
-  TYA
+  TYA |
+  SWA
   deriving (Show)
 
 instance PyFToString Opcode
@@ -102,6 +107,7 @@ data Instruction =
   Zeropage Word16 Opcode Word8 |
   ZeropageX Word16 Opcode Word8 |
   ZeropageY Word16 Opcode Word8 |
+  Switch Word16 Opcode Word16 [Word16] |
   Unknown Word16 Word8
   deriving (Show)
 
@@ -119,6 +125,7 @@ offset (Relative off _ _) = off
 offset (Zeropage off _ _) = off
 offset (ZeropageX off _ _) = off
 offset (ZeropageY off _ _) = off
+offset (Switch off _ _ _) = off
 offset (Unknown off _) = off
 
 opcode :: Instruction -> Opcode
@@ -135,6 +142,7 @@ opcode (Relative _ op _) = op
 opcode (Zeropage _ op _) = op
 opcode (ZeropageX _ op _) = op
 opcode (ZeropageY _ op _) = op
+opcode (Switch _ op _ _) = op
 
 binLength :: Instruction -> Word16
 binLength (Accumulator _ _) = 1
@@ -150,22 +158,27 @@ binLength (Relative _ _ _) = 2
 binLength (Zeropage _ _ _) = 2
 binLength (ZeropageX _ _ _) = 2
 binLength (ZeropageY _ _ _) = 2
+binLength (Switch _ _ len _) = len
 binLength (Unknown _ _) = 1
 
 nextAddr :: Instruction -> Word16
 nextAddr inst = offset inst + binLength inst
 
-followingAddr :: Instruction -> Maybe Word16
-followingAddr (Absolute _ JMP addr) = Just addr
-followingAddr (Implied _ RTS) = Nothing
-followingAddr (Indirect _ JMP _) = Nothing
-followingAddr (Unknown _ _) = Nothing
-followingAddr inst = Just $ nextAddr inst
-
-localBranch :: Instruction -> Maybe Word16
-localBranch (Relative off _ arg) = Just $ fromIntegral $ offset + 2 + (fromIntegral arg)
+followingAddrs :: Instruction -> [Word16]
+followingAddrs (Absolute _ JMP addr) = [addr]
+followingAddrs (Implied _ RTS) = []
+followingAddrs (Indirect _ JMP _) = []
+followingAddrs inst@(Relative off _ arg) = [nextAddr inst, fromIntegral $ offset + 2 + (fromIntegral arg)]
   where offset :: Int = fromIntegral off
-localBranch _ = Nothing
+followingAddrs (Switch _ _ _ addrs) = addrs
+followingAddrs (Unknown _ _) = []
+followingAddrs inst = [nextAddr inst]
+
+localBranches :: Instruction -> [Word16]
+localBranches (Relative off _ arg) = [fromIntegral $ offset + 2 + (fromIntegral arg)]
+  where offset :: Int = fromIntegral off
+localBranches (Switch _ _ _ addrs) = addrs
+localBranches _ = []
 
 callTarget :: Instruction -> Maybe Word16
 callTarget (Absolute _ JSR arg) = Just arg
@@ -356,6 +369,8 @@ toAssembly (Unknown off opcode) = [fmt|{off:04x}: !Unknown {opcode:02x}|]
 toAssembly (Zeropage off op arg) = [fmt|{off:04x}: {op} ${arg:02x}|]
 toAssembly (ZeropageX off op arg) = [fmt|{off:04x}: {op} ${arg:02x},X|]
 toAssembly (ZeropageY off op arg) = [fmt|{off:04x}: {op} ${arg:02x},Y|]
+toAssembly (Switch off op _ addrs) = [fmt|{off:04x}: {op} [{showAddrs}]|]
+  where showAddrs = intercalate ", " $ map (\a -> [fmt|{a:04x}|]) addrs
 
 readInstructions :: Word16 -> AddressSpace -> [Instruction]
 readInstructions off = do
@@ -367,20 +382,22 @@ callTargets :: [Instruction] -> [Word16]
 callTargets = catMaybes . map callTarget
 
 functionBodies :: [Word16] -> AddressSpace -> [(Word16, [Instruction])]
-functionBodies offs = reachableM functionBodies_ offs <&> Map.assocs
+functionBodies = functionBodiesWithParser readInstruction
 
-functionBodies_ :: Word16 -> AddressSpace -> ([Instruction], [Word16])
-functionBodies_ off = do
-  body <- functionBody off
-  return (body, callTargets body)
+functionBodiesWithParser :: (Word16 -> AddressSpace -> Instruction) -> [Word16] -> AddressSpace -> [(Word16, [Instruction])]
+functionBodiesWithParser p offs = reachableM functionBodiesWithParser_ offs <&> Map.assocs
+  where functionBodiesWithParser_ off = do
+          body <- functionBodyWithParser p off
+          return (body, callTargets body)
 
 functionBody :: Word16 -> AddressSpace -> [Instruction]
-functionBody off = reachableM functionBody_ [off] <&> Map.elems
+functionBody = functionBodyWithParser readInstruction
 
-functionBody_ :: Word16 -> AddressSpace -> (Instruction, [Word16])
-functionBody_ off = do
-  inst <- readInstruction off
-  return (inst, catMaybes [followingAddr inst, localBranch inst])
+functionBodyWithParser :: (Word16 -> AddressSpace -> Instruction) -> Word16 -> AddressSpace -> [Instruction]
+functionBodyWithParser p off = reachableM functionBodyWithParser_ [off] <&> Map.elems
+  where functionBodyWithParser_ off = do
+          inst <- p off
+          return (inst, followingAddrs inst)
 
 reachableM :: (Ord a, Monad m) => (a -> m (b, [a])) -> [a] -> m (Map a b)
 reachableM f init = foldrM (reachableM_ f) Map.empty init

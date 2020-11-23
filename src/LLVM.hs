@@ -429,17 +429,17 @@ toIR_ _ inst@(I.Implied _ I.RTS) = retVoid
 toIR_ _ inst@(I.Relative _ I.BCS arg) = do
   cond <- load regC 0
   let next = I.nextAddr inst
-  let branch = fromJust $ I.localBranch inst
+  let branch = I.followingAddrs inst !! 1
   condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{branch:04x}_0|] 
 toIR_ _ inst@(I.Relative _ I.BNE arg) = do
   cond <- load regZ 0
   let next = I.nextAddr inst
-  let branch = fromJust $ I.localBranch inst
+  let branch = I.followingAddrs inst !! 1
   condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|]
 toIR_ _ inst@(I.Relative _ I.BPL arg) = do
   cond <- load regN 0
   let next = I.nextAddr inst
-  let branch = fromJust $ I.localBranch inst
+  let branch = I.followingAddrs inst !! 1
   condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|] 
 toIR_ _ inst = brNext inst
 

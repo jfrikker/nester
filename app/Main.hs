@@ -11,7 +11,6 @@ import AddressSpace (
   resetAddress
   )
 import Assembly (
-  functionBodies,
   readInstructions,
   toAssembly
   )
@@ -32,6 +31,7 @@ import LLVM.Pretty (ppllvm)
 import Nes.File (
   NesFile(prgRom),
   getNesFile)
+import Passes (functionBodies, passBase, smbSwitchPass)
 import PyF (fmt)
 import System.Environment (getArgs)
 
@@ -51,7 +51,8 @@ main = do
   print $ nmiAddress addressSpace
   -- let instructions = take 40 $ readInstructions (resetAddress addressSpace) addressSpace
   -- let instructions = functionBody 0x90cc addressSpace
-  let functions = functionBodies [resetAddress addressSpace, irqAddress addressSpace, nmiAddress addressSpace] addressSpace
+  let parser = smbSwitchPass passBase
+  let functions = functionBodies parser [resetAddress addressSpace, irqAddress addressSpace, nmiAddress addressSpace] addressSpace
   for_ functions $ \(offset, body) -> do
     putStrLn ""
     putStrLn [fmt|{offset:04x}:|]
