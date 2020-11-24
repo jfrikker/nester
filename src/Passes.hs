@@ -24,7 +24,7 @@ functionBodies p offs addr = postProcess p offs funcs
 
 passBase :: Parser
 passBase = Parser {
-  postProcess = \offs -> id,
+  postProcess = const id,
   readInstruction = I.readInstruction
 }
 
@@ -37,14 +37,13 @@ smbSwitchPass underlying = Parser {
           inst <- readInstruction underlying off
           case inst of
             (I.Absolute _ I.JSR 0x8e04) -> do
-              end <- I.readAddress $ off + 3
-              addrs <- mapM I.readAddress [off + 3, (off + 5)..] <&> takeWhile (\o -> o >= 0x8000)
+              addrs <- mapM I.readAddress [off + 3, (off + 5)..] <&> takeWhile (>= 0x8000)
               return $ I.Switch off I.SWA 3 addrs
-            otherwise -> return inst
+            i -> return i
         postProcess_ offs funcs = postProcess underlying offs $ I.functionBodiesWithParser parse offs
-          where filterAddrs (I.Switch off I.SWA len addrs) = I.Switch off I.SWA len $ filter isNotCode addrs
+          where filterAddrs (I.Switch off I.SWA len addrs) = I.Switch off I.SWA len $ take (fromIntegral $ head $ filter isNotCode [off + 3..off + 3 + fromIntegral (length addrs)] ++ [0]) addrs
                 filterAddrs i = i
-                isNotCode a = null $ instructionsMatching (\i -> a == I.offset i) funcs
+                isNotCode a = null $ instructionsMatching (\i -> a == I.offset i || a + 1 == I.offset i) funcs
                 repaired = mapInstructions filterAddrs $ postProcess underlying offs funcs
                 flattened = foldr Map.union Map.empty $ Map.elems repaired
                 parse = (!) flattened

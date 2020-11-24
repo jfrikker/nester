@@ -18,15 +18,14 @@ module Assembly (
 
 import AddressSpace (AddressSpace, readAddress, readValue)
 import Control.Monad.Extra (iterateM)
-import Data.Bytes.Signed (signed)
 import Data.Int(Int8)
 import Data.Foldable (foldrM)
-import Data.Functor ((<&>))
+import Data.Functor.Identity (Identity(runIdentity))
 import Data.List (intercalate)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Word(Word8, Word16)
-import Data.Maybe (catMaybes)
+import Data.Maybe (mapMaybe)
 import PyF (fmt)
 import PyF.Class
 
@@ -128,38 +127,22 @@ offset (ZeropageY off _ _) = off
 offset (Switch off _ _ _) = off
 offset (Unknown off _) = off
 
-opcode :: Instruction -> Opcode
-opcode (Accumulator _ op) = op
-opcode (Absolute _ op _) = op
-opcode (AbsoluteX _ op _) = op
-opcode (AbsoluteY _ op _) = op
-opcode (Immediate _ op _) = op
-opcode (Implied _ op) = op
-opcode (Indirect _ op _) = op
-opcode (IndirectX _ op _) = op
-opcode (IndirectY _ op _) = op
-opcode (Relative _ op _) = op
-opcode (Zeropage _ op _) = op
-opcode (ZeropageX _ op _) = op
-opcode (ZeropageY _ op _) = op
-opcode (Switch _ op _ _) = op
-
 binLength :: Instruction -> Word16
-binLength (Accumulator _ _) = 1
-binLength (Absolute _ _ _) = 3
-binLength (AbsoluteX _ _ _) = 3
-binLength (AbsoluteY _ _ _) = 3
-binLength (Immediate _ _ _) = 2
-binLength (Implied _ _) = 1
-binLength (Indirect _ _ _) = 3
-binLength (IndirectX _ _ _) = 2
-binLength (IndirectY _ _ _) = 2
-binLength (Relative _ _ _) = 2
-binLength (Zeropage _ _ _) = 2
-binLength (ZeropageX _ _ _) = 2
-binLength (ZeropageY _ _ _) = 2
+binLength Accumulator {} = 1
+binLength Absolute {} = 3
+binLength AbsoluteX {} = 3
+binLength AbsoluteY {} = 3
+binLength Immediate {} = 2
+binLength Implied {} = 1
+binLength Indirect {} = 3
+binLength IndirectX {} = 2
+binLength IndirectY {} = 2
+binLength Relative {} = 2
+binLength Zeropage {} = 2
+binLength ZeropageX {} = 2
+binLength ZeropageY {} = 2
 binLength (Switch _ _ len _) = len
-binLength (Unknown _ _) = 1
+binLength Unknown {} = 1
 
 nextAddr :: Instruction -> Word16
 nextAddr inst = offset inst + binLength inst
@@ -168,17 +151,11 @@ followingAddrs :: Instruction -> [Word16]
 followingAddrs (Absolute _ JMP addr) = [addr]
 followingAddrs (Implied _ RTS) = []
 followingAddrs (Indirect _ JMP _) = []
-followingAddrs inst@(Relative off _ arg) = [nextAddr inst, fromIntegral $ offset + 2 + (fromIntegral arg)]
+followingAddrs inst@(Relative off _ arg) = [nextAddr inst, fromIntegral $ offset + 2 + fromIntegral arg]
   where offset :: Int = fromIntegral off
 followingAddrs (Switch _ _ _ addrs) = addrs
 followingAddrs (Unknown _ _) = []
 followingAddrs inst = [nextAddr inst]
-
-localBranches :: Instruction -> [Word16]
-localBranches (Relative off _ arg) = [fromIntegral $ offset + 2 + (fromIntegral arg)]
-  where offset :: Int = fromIntegral off
-localBranches (Switch _ _ _ addrs) = addrs
-localBranches _ = []
 
 callTarget :: Instruction -> Maybe Word16
 callTarget (Absolute _ JSR arg) = Just arg
@@ -338,19 +315,20 @@ readInstruction offset = readValue offset >>= ri_
         ri_ 0xfd = readAbsoluteX SBC
         ri_ 0xfe = readAbsoluteX INC
         ri_ x = return $ Unknown offset x
-        readAbsolute opcode = Absolute offset opcode <$> (readAddress $ offset + 1)
-        readAbsoluteX opcode = AbsoluteX offset opcode <$> (readAddress $ offset + 1)
-        readAbsoluteY opcode = AbsoluteY offset opcode <$> (readAddress $ offset + 1)
+        readAbsolute opcode = Absolute offset opcode <$> readAddress nextOffset
+        readAbsoluteX opcode = AbsoluteX offset opcode <$> readAddress nextOffset
+        readAbsoluteY opcode = AbsoluteY offset opcode <$> readAddress nextOffset
         readAccumulator opcode = return $ Accumulator offset opcode
-        readImmediate opcode = Immediate offset opcode <$> (readValue $ offset + 1)
+        readImmediate opcode = Immediate offset opcode <$> readValue nextOffset
         readImplied opcode = return $ Implied offset opcode
-        readIndirect opcode = Indirect offset opcode <$> (readAddress $ offset + 1)
-        readIndirectX opcode = IndirectX offset opcode <$> (readValue $ offset + 1)
-        readIndirectY opcode = IndirectY offset opcode <$> (readValue $ offset + 1)
-        readRelative opcode = Relative offset opcode <$> fromIntegral <$> (readValue $ offset + 1)
-        readZeropage opcode = Zeropage offset opcode <$> (readValue $ offset + 1)
-        readZeropageX opcode = ZeropageX offset opcode <$> (readValue $ offset + 1)
-        readZeropageY opcode = ZeropageY offset opcode <$> (readValue $ offset + 1)
+        readIndirect opcode = Indirect offset opcode <$> readAddress nextOffset
+        readIndirectX opcode = IndirectX offset opcode <$> readValue nextOffset
+        readIndirectY opcode = IndirectY offset opcode <$> readValue nextOffset
+        readRelative opcode = Relative offset opcode . fromIntegral <$> readValue nextOffset
+        readZeropage opcode = Zeropage offset opcode <$> readValue nextOffset
+        readZeropageX opcode = ZeropageX offset opcode <$> readValue nextOffset
+        readZeropageY opcode = ZeropageY offset opcode <$> readValue nextOffset
+        nextOffset = offset + 1
 
 toAssembly :: Instruction -> String
 toAssembly (Accumulator off op) = [fmt|{off:04x}: {op} A|]
@@ -364,7 +342,7 @@ toAssembly (IndirectX off op arg) = [fmt|{off:04x}: {op} (${arg:02x},X)|]
 toAssembly (IndirectY off op arg) = [fmt|{off:04x}: {op} (${arg:02x}),Y|]
 toAssembly (Relative off op arg) = [fmt|{off:04x}: {op} ({target:04x})|]
   where offset :: Int = fromIntegral off
-        target = offset + 2 + (fromIntegral arg)
+        target = offset + 2 + fromIntegral arg
 toAssembly (Unknown off opcode) = [fmt|{off:04x}: !Unknown {opcode:02x}|]
 toAssembly (Zeropage off op arg) = [fmt|{off:04x}: {op} ${arg:02x}|]
 toAssembly (ZeropageX off op arg) = [fmt|{off:04x}: {op} ${arg:02x},X|]
@@ -379,27 +357,37 @@ readInstructions off = do
   return (inst : rest)
 
 callTargets :: [Instruction] -> [Word16]
-callTargets = catMaybes . map callTarget
+callTargets = mapMaybe callTarget
 
 functionBodies :: [Word16] -> AddressSpace -> Map Word16 (Map Word16 Instruction)
-functionBodies offs mem = functionBodiesWithParser (\off -> readInstruction off mem) offs
+functionBodies = functionBodiesWithParserM readInstruction
 
 functionBodiesWithParser :: (Word16 -> Instruction) -> [Word16] -> Map Word16 (Map Word16 Instruction)
-functionBodiesWithParser p offs = reachable functionBodiesWithParser_ offs
-  where functionBodiesWithParser_ off = (body, callTargets $ Map.elems body)
-          where body = functionBodyWithParser p off
+functionBodiesWithParser p = runIdentity . functionBodiesWithParserM (return . p)
+
+functionBodiesWithParserM :: Monad m => (Word16 -> m Instruction) -> [Word16] -> m (Map Word16 (Map Word16 Instruction))
+functionBodiesWithParserM p = reachableM functionBodiesWithParser_
+  where functionBodiesWithParser_ off = do
+          body <- functionBodyWithParserM p off
+          return (body, callTargets $ Map.elems body)
 
 functionBody :: Word16 -> AddressSpace -> Map Word16 Instruction
-functionBody off mem = functionBodyWithParser (\off2 -> readInstruction off2 mem) off
+functionBody = functionBodyWithParserM readInstruction
 
 functionBodyWithParser :: (Word16 -> Instruction) -> Word16 -> Map Word16 Instruction
-functionBodyWithParser p off = reachable functionBodyWithParser_ [off]
-  where functionBodyWithParser_ off = (inst, followingAddrs inst)
-          where inst = p off
+functionBodyWithParser p = runIdentity . functionBodyWithParserM (return . p)
 
-reachable :: Ord a => (a -> (b, [a])) -> [a] -> Map a b
-reachable f init = foldr (reachable_ f) Map.empty init
-  where reachable_ f key acc
-          | Map.member key acc = acc
-          | otherwise = foldr (reachable_ f) (Map.insert key val acc) next
-            where (val, next) = f key
+functionBodyWithParserM :: Monad m => (Word16 -> m Instruction) -> Word16 -> m (Map Word16 Instruction)
+functionBodyWithParserM p off = reachableM functionBodyWithParserM_ [off]
+  where functionBodyWithParserM_ off = do
+          inst <- p off
+          return (inst, followingAddrs inst)
+
+reachableM :: (Ord a, Monad m) => (a -> m (b, [a])) -> [a] -> m (Map a b)
+reachableM f = foldrM reachableM_ Map.empty
+  where reachableM_ key acc
+          | Map.member key acc = return acc
+          | otherwise = do
+            (val, next) <- f key
+            let nextAcc = Map.insert key val acc
+            foldrM reachableM_ nextAcc next

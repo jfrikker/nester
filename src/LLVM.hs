@@ -6,7 +6,6 @@ module LLVM (
 import AddressSpace(AddressSpace, resetAddress)
 import qualified Assembly as I
 import Control.Monad (forM_, void)
-import Data.Maybe (fromJust)
 import Data.Word (Word8, Word16)
 import LLVM.AST hiding (function)
 import qualified LLVM.AST.CallingConvention as CC
@@ -58,15 +57,13 @@ getReadCallback :: Operand -> IRBuilder Operand
 getReadCallback cb = do
   addr <- emitInstr (ptr $ ptr readCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
             ConstantOperand $ C.Int 32 0] []
-  val <- load addr 0
-  return val
+  load addr 0
 
 getWriteCallback :: Operand -> IRBuilder Operand
 getWriteCallback cb = do
   addr <- emitInstr (ptr $ ptr writeCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
             ConstantOperand $ C.Int 32 1] []
-  val <- load addr 0
-  return val
+  load addr 0
 
 memDef :: Definition
 memDef = GlobalDefinition globalVariableDefaults {
@@ -189,7 +186,7 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
           condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
-          ifLowVal <- getMemValue addr
+          ifLowVal <- getMemValue ifLowLoc
           ret ifLowVal
           elseLow <- block `named` "elseLow"
           condPpu <- icmp P.ULT addr $ literalAddr 0x4000
@@ -198,7 +195,7 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
           ppuLocTemp <- sub addr $ literalAddr 0x2000
           ppuLocTemp2 <- urem ppuLocTemp $ literalAddr 0x100
           ppuLoc <- add ppuLocTemp2 $ literalAddr 0x2000
-          ppuVal <- doReadCallback addr
+          ppuVal <- doReadCallback ppuLoc
           ret ppuVal
           elsePpu <- block `named` "elsePpu"
           condApu <- icmp P.ULT addr $ literalAddr 0x4020
@@ -247,7 +244,7 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
           condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
-          setMemValue addr val
+          setMemValue ifLowLoc val
           retVoid
           elseLow <- block `named` "elseLow"
           condPpu <- icmp P.ULT addr $ literalAddr 0x4000
@@ -339,16 +336,16 @@ toIR_ :: Operand -> I.Instruction -> IRBuilder ()
 toIR_ cb inst@(I.Absolute _ I.BIT arg) = do
   val <- readMem cb (literalAddr arg)
   nval <- lshr val $ literal 7
-  nvalTrunc <- trunc val i1
+  nvalTrunc <- trunc nval i1
   store regN 0 nvalTrunc
   vval <- lshr val $ literal 6
-  vvalTrunc <- trunc val i1
+  vvalTrunc <- trunc vval i1
   store regV 0 vvalTrunc
   a <- load regA 0
   res <- LLVM.IRBuilder.and a val
   setZ res
   brNext inst
-toIR_ cb inst@(I.Absolute _ I.JMP arg) = do
+toIR_ _ (I.Absolute _ I.JMP arg) = do
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ cb inst@(I.Absolute _ I.JSR arg) = do
   call (functionAtAddr arg) [(cb, [])]
@@ -379,11 +376,11 @@ toIR_ cb inst@(I.AbsoluteY _ I.STA arg) = do
   brNext inst
 toIR_ _ inst@(I.Immediate _ I.AND arg) = do
   a <- load regA 0
-  newA <- LLVM.IRBuilder.and a $ literal 1
+  newA <- LLVM.IRBuilder.and a $ literal arg
   store regA 0 newA
   setNZ newA
   brNext inst
-toIR_ cb inst@(I.Immediate _ I.CMP arg) = do
+toIR_ _ inst@(I.Immediate _ I.CMP arg) = do
   a <- load regA 0
   (res, carry) <- subCarry a $ literal arg
   setNZ res
@@ -394,7 +391,7 @@ toIR_ _ inst@(I.Immediate _ I.LDX arg) = store regX 0 (literal arg) >> setNZ (li
 toIR_ _ inst@(I.Immediate _ I.LDY arg) = store regY 0 (literal arg) >> setNZ (literal arg) >> brNext inst
 toIR_ _ inst@(I.Immediate _ I.ORA arg) = do
   a <- load regA 0
-  newA <- LLVM.IRBuilder.or a $ literal 1
+  newA <- LLVM.IRBuilder.or a $ literal arg
   store regA 0 newA
   setNZ newA
   brNext inst
@@ -425,22 +422,19 @@ toIR_ _ inst@(I.Implied _ I.TXS) = do
   x <- load regX 0
   store regS 0 x
   brNext inst
-toIR_ _ inst@(I.Implied _ I.RTS) = retVoid
+toIR_ _ (I.Implied _ I.RTS) = retVoid
 toIR_ _ inst@(I.Relative _ I.BCS arg) = do
   cond <- load regC 0
   let next = I.nextAddr inst
-  let branch = I.followingAddrs inst !! 1
-  condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{branch:04x}_0|] 
+  condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{arg:04x}_0|] 
 toIR_ _ inst@(I.Relative _ I.BNE arg) = do
   cond <- load regZ 0
   let next = I.nextAddr inst
-  let branch = I.followingAddrs inst !! 1
-  condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|]
+  condBr cond [fmt|lbl_{arg:04x}_0|] [fmt|lbl_{next:04x}_0|]
 toIR_ _ inst@(I.Relative _ I.BPL arg) = do
   cond <- load regN 0
   let next = I.nextAddr inst
-  let branch = I.followingAddrs inst !! 1
-  condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|] 
+  condBr cond [fmt|lbl_{arg:04x}_0|] [fmt|lbl_{next:04x}_0|] 
 toIR_ _ inst = brNext inst
 
 literal :: Word8 -> Operand

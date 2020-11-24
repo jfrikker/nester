@@ -20,7 +20,7 @@ data AddressSpace = AddressSpace {
 readRom :: Word16 -> BS.ByteString -> Word16 -> Maybe Word8
 readRom offset rom idx
   | idx < offset = Nothing
-  | idx -  offset >= (fromIntegral $ BS.length rom) = Nothing
+  | idx -  offset >= fromIntegral (BS.length rom) = Nothing
   | otherwise = Just $ BS.index rom (fromIntegral $ idx - offset)
 
 readValue :: Word16 -> AddressSpace -> Word8
@@ -30,7 +30,7 @@ readAddress :: Word16 -> AddressSpace -> Word16
 readAddress offset = do
   low <- readValue offset <&> fromIntegral
   high <- readValue (offset + 1) <&> fromIntegral
-  return $ low + (shiftL high 8)
+  return $ low + shiftL high 8
 
 resetAddress :: AddressSpace -> Word16
 resetAddress = readAddress 0xfffc
