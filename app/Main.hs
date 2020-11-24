@@ -53,9 +53,9 @@ main = do
   -- let instructions = functionBody 0x90cc addressSpace
   let parser = smbSwitchPass passBase
   let functions = functionBodies parser [resetAddress addressSpace, irqAddress addressSpace, nmiAddress addressSpace] addressSpace
-  for_ functions $ \(offset, body) -> do
+  for_ (Map.assocs functions) $ \(offset, body) -> do
     putStrLn ""
     putStrLn [fmt|{offset:04x}:|]
-    for_ body $ putStrLn . toAssembly
+    for_ (Map.elems body) $ putStrLn . toAssembly
   -- TIO.putStrLn $ ppllvm $ toIRNes addressSpace
   return ()

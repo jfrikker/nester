@@ -381,30 +381,25 @@ readInstructions off = do
 callTargets :: [Instruction] -> [Word16]
 callTargets = catMaybes . map callTarget
 
-functionBodies :: [Word16] -> AddressSpace -> [(Word16, [Instruction])]
-functionBodies = functionBodiesWithParser readInstruction
+functionBodies :: [Word16] -> AddressSpace -> Map Word16 (Map Word16 Instruction)
+functionBodies offs mem = functionBodiesWithParser (\off -> readInstruction off mem) offs
 
-functionBodiesWithParser :: (Word16 -> AddressSpace -> Instruction) -> [Word16] -> AddressSpace -> [(Word16, [Instruction])]
-functionBodiesWithParser p offs = reachableM functionBodiesWithParser_ offs <&> Map.assocs
-  where functionBodiesWithParser_ off = do
-          body <- functionBodyWithParser p off
-          return (body, callTargets body)
+functionBodiesWithParser :: (Word16 -> Instruction) -> [Word16] -> Map Word16 (Map Word16 Instruction)
+functionBodiesWithParser p offs = reachable functionBodiesWithParser_ offs
+  where functionBodiesWithParser_ off = (body, callTargets $ Map.elems body)
+          where body = functionBodyWithParser p off
 
-functionBody :: Word16 -> AddressSpace -> [Instruction]
-functionBody = functionBodyWithParser readInstruction
+functionBody :: Word16 -> AddressSpace -> Map Word16 Instruction
+functionBody off mem = functionBodyWithParser (\off2 -> readInstruction off2 mem) off
 
-functionBodyWithParser :: (Word16 -> AddressSpace -> Instruction) -> Word16 -> AddressSpace -> [Instruction]
-functionBodyWithParser p off = reachableM functionBodyWithParser_ [off] <&> Map.elems
-  where functionBodyWithParser_ off = do
-          inst <- p off
-          return (inst, followingAddrs inst)
+functionBodyWithParser :: (Word16 -> Instruction) -> Word16 -> Map Word16 Instruction
+functionBodyWithParser p off = reachable functionBodyWithParser_ [off]
+  where functionBodyWithParser_ off = (inst, followingAddrs inst)
+          where inst = p off
 
-reachableM :: (Ord a, Monad m) => (a -> m (b, [a])) -> [a] -> m (Map a b)
-reachableM f init = foldrM (reachableM_ f) Map.empty init
-
-reachableM_ :: (Ord a, Monad m) => (a -> m (b, [a])) -> a -> Map a b -> m (Map a b)
-reachableM_ f key acc
-  | Map.member key acc = return acc
-  | otherwise = do
-    (val, next) <- f key
-    foldrM (reachableM_ f) (Map.insert key val acc) $ next
+reachable :: Ord a => (a -> (b, [a])) -> [a] -> Map a b
+reachable f init = foldr (reachable_ f) Map.empty init
+  where reachable_ f key acc
+          | Map.member key acc = acc
+          | otherwise = foldr (reachable_ f) (Map.insert key val acc) next
+            where (val, next) = f key
