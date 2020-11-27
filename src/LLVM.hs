@@ -3,9 +3,11 @@ module LLVM (
   toIRNes
 ) where
 
-import AddressSpace(AddressSpace, resetAddress)
+import AddressSpace(AddressSpace, nmiAddress, resetAddress)
 import qualified Assembly as I
 import Control.Monad (forM_, void)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Word (Word8, Word16)
 import LLVM.AST hiding (function)
 import qualified LLVM.AST.CallingConvention as CC
@@ -65,6 +67,24 @@ getWriteCallback cb = do
             ConstantOperand $ C.Int 32 1] []
   load addr 0
 
+registersStructDef :: Definition
+registersStructDef = TypeDefinition "struct.registers" $ Just StructureType {
+    isPacked = False,
+    elementTypes = [
+      i8,
+      i8,
+      i8,
+      i1,
+      i1,
+      i1,
+      i1,
+      i8
+    ]
+  }
+
+registersStruct :: Type
+registersStruct = NamedTypeReference "struct.registers"
+
 memDef :: Definition
 memDef = GlobalDefinition globalVariableDefaults {
   G.name = "mem",
@@ -86,64 +106,32 @@ setMemValue addr val = do
   addr' <- emitInstr (ptr i8) $ GetElementPtr True mem [ConstantOperand $ C.Int 32 0, addr] []
   store addr' 0 val
 
-regDef :: Type -> Name -> Definition
-regDef type' name = GlobalDefinition globalVariableDefaults {
-  G.name = name,
-  G.type' = type',
-  G.linkage = L.Private,
-  G.initializer = Just $ C.Int 8 0
-}
-
 regRef :: Type -> Name -> Operand
-regRef type' = ConstantOperand . C.GlobalReference (ptr type')
-
-regADef :: Definition
-regADef = regDef i8 "regA"
+regRef type' = LocalReference (ptr type')
 
 regA :: Operand
-regA = regRef i8 "regA"
-
-regXDef :: Definition
-regXDef = regDef i8 "regX"
+regA = regRef i8 "regA_0"
 
 regX :: Operand
-regX = regRef i8 "regX"
-
-regYDef :: Definition
-regYDef = regDef i8 "regY"
+regX = regRef i8 "regX_0"
 
 regY :: Operand
-regY = regRef i8 "regY"
-
-regNDef :: Definition
-regNDef = regDef i1 "regN"
+regY = regRef i8 "regY_0"
 
 regN :: Operand
-regN = regRef i1 "regN"
-
-regZDef :: Definition
-regZDef = regDef i1 "regZ"
+regN = regRef i1 "regN_0"
 
 regZ :: Operand
-regZ = regRef i1 "regZ"
-
-regVDef :: Definition
-regVDef = regDef i1 "regV"
+regZ = regRef i1 "regZ_0"
 
 regV :: Operand
-regV = regRef i1 "regV"
-
-regCDef :: Definition
-regCDef = regDef i1 "regC"
+regV = regRef i1 "regV_0"
 
 regC :: Operand
-regC = regRef i1 "regC"
-
-regSDef :: Definition
-regSDef = regDef i8 "regS"
+regC = regRef i1 "regC_0"
 
 regS :: Operand
-regS = regRef i8 "regS"
+regS = regRef i8 "regS_0"
 
 subCarryDef :: Definition
 subCarryDef = GlobalDefinition functionDefaults {
@@ -214,7 +202,7 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
             returnAttributes = [],
             LI.function = Right readCb,
             arguments = [(addr, [])],
-            functionAttributes = [Right FA.ReadNone],
+            functionAttributes = [],
             metadata = []
           }
 
@@ -272,7 +260,7 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
             returnAttributes = [],
             LI.function = Right writeCb,
             arguments = [(addr, []), (val, [])],
-            functionAttributes = [Right FA.ReadNone],
+            functionAttributes = [],
             metadata = []
           }
 
@@ -292,39 +280,84 @@ resetDef mem = GlobalDefinition $ functionDefaults {
   G.returnType = VoidType,
   G.basicBlocks = body
   }
-  where state = LocalReference (ptr callbacksStruct) "callbacks"
-        body = execIRBuilder emptyIRBuilder $ mdo
-          call (functionAtAddr $ resetAddress mem) [(state, [])]
+  where cb = LocalReference (ptr callbacksStruct) "callbacks"
+        body = execIRBuilder emptyIRBuilder $ do
+          result <- alloca registersStruct Nothing 0
+          call (functionAtAddr $ resetAddress mem) [(cb, []), (result, []), (literal 0, []), (literal 0, []),
+            (literal 0, []), (ConstantOperand $ C.Int 1 0, []), (ConstantOperand $ C.Int 1 0, []),
+            (ConstantOperand $ C.Int 1 0, []), (ConstantOperand $ C.Int 1 0, []), (literal 0, [])]
+          retVoid
+
+nmiDef :: AddressSpace -> Definition
+nmiDef mem = GlobalDefinition $ functionDefaults {
+  G.name = "nmi",
+  G.parameters = ([Parameter (ptr callbacksStruct) "callbacks" []], False),
+  G.returnType = VoidType,
+  G.basicBlocks = body
+  }
+  where cb = LocalReference (ptr callbacksStruct) "callbacks"
+        body = execIRBuilder emptyIRBuilder $ do
+          result <- alloca registersStruct Nothing 0
+          call (functionAtAddr $ nmiAddress mem) [(cb, []), (result, []), (literal 0, []), (literal 0, []),
+            (literal 0, []), (ConstantOperand $ C.Int 1 0, []), (ConstantOperand $ C.Int 1 0, []),
+            (ConstantOperand $ C.Int 1 0, []), (ConstantOperand $ C.Int 1 0, []), (literal 0, [])]
           retVoid
 
 nesModuleDefs :: [Definition]
 nesModuleDefs = [nesReadMemDef, nesWriteMemDef]
 
 moduleDefs :: [Definition]
-moduleDefs = [callbacksStructDef, memDef, regADef, regXDef, regYDef, regSDef, regNDef, regZDef, regCDef, regVDef, 
-  subCarryDef]
+moduleDefs = [callbacksStructDef, registersStructDef, memDef, subCarryDef]
 
-toIRNes :: AddressSpace -> Module
-toIRNes mem = defaultModule {
+toIRNes :: Map Word16 (Map Word16 I.Instruction) -> AddressSpace -> Module
+toIRNes funcs mem = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, toIRFunction 0x8000 mem, toIRFunction 0x8eed mem,
-    toIRFunction 0x8220 mem, toIRFunction 0x8e19 mem, toIRFunction 0x8e2d mem,  toIRFunction 0x90cc mem]
+  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, nmiDef mem] ++ irFuncs
   }
+  where irFuncs = map (\(off, body) -> toIRFunction off $ Map.elems body) $ Map.assocs funcs
 
-toIRFunction :: Word16 -> AddressSpace -> Definition
-toIRFunction addr mem = GlobalDefinition $ functionDefaults {
+toIRFunction :: Word16 -> [I.Instruction] -> Definition
+toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   G.name = [fmt|func_{addr:04x}|],
-  G.parameters = ([Parameter (ptr callbacksStruct) "callbacks" []], False),
+  G.parameters = ([Parameter (ptr callbacksStruct) "callbacks" [], Parameter (ptr registersStruct) "result" [],
+                   Parameter i8 "regA_arg" [],
+                   Parameter i8 "regX_arg" [], Parameter i8 "regY_arg" [],
+                   Parameter i1 "regN_arg" [], Parameter i1 "regZ_arg" [],
+                   Parameter i1 "regV_arg" [], Parameter i1 "regC_arg" [],
+                   Parameter i8 "regS_arg" []], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
   G.basicBlocks = body
   }
   where callbacks = LocalReference (ptr callbacksStruct) "callbacks"
-        insts = I.functionBody addr mem
         body = execIRBuilder emptyIRBuilder $ mdo
           block `named` "entry"
+          copyReg "regA" i8 "regA_arg"
+          copyReg "regX" i8 "regX_arg"
+          copyReg "regY" i8 "regY_arg"
+          copyReg "regN" i1 "regN_arg"
+          copyReg "regZ" i1 "regZ_arg"
+          copyReg "regV" i1 "regV_arg"
+          copyReg "regC" i1 "regC_arg"
+          copyReg "regS" i8 "regS_arg"
+          localCb <- alloca callbacksStruct Nothing 0
+          readSrc <- emitInstr (ptr $ ptr readCallbackType) $ GetElementPtr True callbacks [ConstantOperand $ C.Int 32 0,
+                    ConstantOperand $ C.Int 32 0] []
+          readTgt <- emitInstr (ptr $ ptr readCallbackType) $ GetElementPtr True localCb [ConstantOperand $ C.Int 32 0,
+                    ConstantOperand $ C.Int 32 0] []
+          read <- load readSrc 0
+          store readTgt 0 read
+          writeSrc <- emitInstr (ptr $ ptr writeCallbackType) $ GetElementPtr True callbacks [ConstantOperand $ C.Int 32 0,
+                    ConstantOperand $ C.Int 32 1] []
+          writeTgt <- emitInstr (ptr $ ptr writeCallbackType) $ GetElementPtr True localCb [ConstantOperand $ C.Int 32 0,
+                    ConstantOperand $ C.Int 32 1] []
+          write <- load writeSrc 0
+          store writeTgt 0 write
           br [fmt|lbl_{addr:04x}_0|]
-          forM_ insts $ toIR callbacks
+          forM_ insts $ toIR localCb
+        copyReg name t arg = do
+          reg <- alloca t Nothing 0 `named` name
+          store reg 0 $ LocalReference t arg
 
 toIR :: Operand -> I.Instruction -> IRBuilder ()
 toIR cb inst = do
@@ -345,11 +378,40 @@ toIR_ cb inst@(I.Absolute _ I.BIT arg) = do
   res <- LLVM.IRBuilder.and a val
   setZ res
   brNext inst
+toIR_ cb inst@(I.Absolute _ I.INC arg) = do
+  val <- readMem cb (literalAddr arg)
+  res <- add val $ literal 1
+  writeMem cb (literalAddr arg) res
+  setNZ res
+  brNext inst
 toIR_ _ (I.Absolute _ I.JMP arg) = do
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ cb inst@(I.Absolute _ I.JSR arg) = do
-  call (functionAtAddr arg) [(cb, [])]
+  a <- load regA 0
+  x <- load regX 0
+  y <- load regY 0
+  n <- load regN 0
+  z <- load regZ 0
+  v <- load regV 0
+  c <- load regC 0
+  s <- load regS 0
+  res <- alloca registersStruct Nothing 0
+  call (functionAtAddr arg) [(cb, []), (res, []), (a, []), (x, []),
+    (y, []), (n, []), (z, []), (v, []), (c, []), (s, [])]
+  storeReg res regA i8 0
+  storeReg res regX i8 1
+  storeReg res regY i8 2
+  storeReg res regN i1 3
+  storeReg res regZ i1 4
+  storeReg res regV i1 5
+  storeReg res regC i1 6
+  storeReg res regS i8 7
   brNext inst
+  where storeReg res op t idx = do
+          addr <- emitInstr (ptr t) $ GetElementPtr True res [ConstantOperand $ C.Int 32 0,
+                    ConstantOperand $ C.Int 32 idx] []
+          val <- load addr 0
+          store op 0 val
 toIR_ cb inst@(I.Absolute _ I.LDA arg) = do
   val <- readMem cb (literalAddr arg)
   store regA 0 val
@@ -363,6 +425,14 @@ toIR_ cb inst@(I.AbsoluteX _ I.LDA arg) = do
   x <- load regX 0
   xExt <- zext x i16
   addr <- add xExt $ literalAddr arg
+  val <- readMem cb addr
+  store regA 0 val
+  setNZ val
+  brNext inst
+toIR_ cb inst@(I.AbsoluteY _ I.LDA arg) = do
+  y <- load regY 0
+  yExt <- zext y i16
+  addr <- add yExt $ literalAddr arg
   val <- readMem cb addr
   store regA 0 val
   setNZ val
@@ -413,6 +483,11 @@ toIR_ _ inst@(I.Implied _ I.INY) = do
   store regY 0 newY
   setNZ newY
   brNext inst
+toIR_ _ inst@(I.Implied _ I.TAY) = do
+  a <- load regA 0
+  store regY 0 a
+  setNZ a
+  brNext inst
 toIR_ _ inst@(I.Implied _ I.TXA) = do
   x <- load regX 0
   store regA 0 x
@@ -422,19 +497,38 @@ toIR_ _ inst@(I.Implied _ I.TXS) = do
   x <- load regX 0
   store regS 0 x
   brNext inst
-toIR_ _ (I.Implied _ I.RTS) = retVoid
-toIR_ _ inst@(I.Relative _ I.BCS arg) = do
+toIR_ _ (I.Implied _ I.RTS) = populateResult >> retVoid
+toIR_ _ inst@(I.Relative _ I.BCS _) = do
   cond <- load regC 0
   let next = I.nextAddr inst
-  condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{arg:04x}_0|] 
-toIR_ _ inst@(I.Relative _ I.BNE arg) = do
+  let branch = I.followingAddrs inst !! 1
+  condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|] 
+toIR_ _ inst@(I.Relative _ I.BEQ _) = do
   cond <- load regZ 0
   let next = I.nextAddr inst
-  condBr cond [fmt|lbl_{arg:04x}_0|] [fmt|lbl_{next:04x}_0|]
-toIR_ _ inst@(I.Relative _ I.BPL arg) = do
+  let branch = I.followingAddrs inst !! 1
+  condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|]
+toIR_ _ inst@(I.Relative _ I.BNE _) = do
+  cond <- load regZ 0
+  let next = I.nextAddr inst
+  let branch = I.followingAddrs inst !! 1
+  condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{branch:04x}_0|]
+toIR_ _ inst@(I.Relative _ I.BPL _) = do
   cond <- load regN 0
   let next = I.nextAddr inst
-  condBr cond [fmt|lbl_{arg:04x}_0|] [fmt|lbl_{next:04x}_0|] 
+  let branch = I.followingAddrs inst !! 1
+  condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{branch:04x}_0|] 
+toIR_ _ (I.Switch _ I.SWA _ tgts) = do
+  cond <- load regA 0
+  let first = head tgts
+  switch cond [fmt|lbl_{first:04x}_0|] $ zipWith (curry (\(i, t) -> (C.Int 8 i, [fmt|lbl_{t:04x}_0|]))) [0..] tgts
+toIR_ cb inst@(I.Zeropage _ I.LDA arg) = do
+  addr <- zext (literal arg) i16
+  val <- readMem cb addr
+  store regA 0 val
+  setNZ val
+  brNext inst
+toIR_ _ I.Unknown {} = populateResult >> retVoid -- TODO
 toIR_ _ inst = brNext inst
 
 literal :: Word8 -> Operand
@@ -464,3 +558,19 @@ setZ :: Operand -> IRBuilder ()
 setZ val = do
   bit <- icmp P.EQ val $ literal 0x0
   store regZ 0 bit
+
+populateResult :: IRBuilder ()
+populateResult = do
+  storeReg regA i8 0
+  storeReg regX i8 1
+  storeReg regY i8 2
+  storeReg regN i1 3
+  storeReg regZ i1 4
+  storeReg regV i1 5
+  storeReg regC i1 6
+  storeReg regS i8 7
+  where storeReg op t idx = do
+          addr <- emitInstr (ptr t) $ GetElementPtr True (LocalReference (ptr registersStruct) "result") [ConstantOperand $ C.Int 32 0,
+                    ConstantOperand $ C.Int 32 idx] []
+          val <- load op 0
+          store addr 0 val

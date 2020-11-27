@@ -45,17 +45,17 @@ main = do
   let file = head args
   buf <- BS.readFile file
   let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  let addressSpace = mapper0 $ prgRom file
-  print $ resetAddress addressSpace
-  print $ irqAddress addressSpace
-  print $ nmiAddress addressSpace
+  let mem = mapper0 $ prgRom file
+  -- print $ resetAddress mem
+  -- print $ irqAddress mem
+  -- print $ nmiAddress mem
   -- let instructions = take 40 $ readInstructions (resetAddress addressSpace) addressSpace
   -- let instructions = functionBody 0x90cc addressSpace
   let parser = smbSwitchPass passBase
-  let functions = functionBodies parser [resetAddress addressSpace, irqAddress addressSpace, nmiAddress addressSpace] addressSpace
-  for_ (Map.assocs functions) $ \(offset, body) -> do
-    putStrLn ""
-    putStrLn [fmt|{offset:04x}:|]
-    for_ (Map.elems body) $ putStrLn . toAssembly
-  -- TIO.putStrLn $ ppllvm $ toIRNes addressSpace
+  let functions = functionBodies parser [resetAddress mem, irqAddress mem, nmiAddress mem] mem
+  -- for_ (Map.assocs functions) $ \(offset, body) -> do
+  --   putStrLn ""
+  --   putStrLn [fmt|{offset:04x}:|]
+  --   for_ (Map.elems body) $ putStrLn . toAssembly
+  TIO.putStrLn $ ppllvm $ toIRNes functions mem
   return ()

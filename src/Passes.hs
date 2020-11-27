@@ -41,10 +41,11 @@ smbSwitchPass underlying = Parser {
               return $ I.Switch off I.SWA 3 addrs
             i -> return i
         postProcess_ offs funcs = postProcess underlying offs $ I.functionBodiesWithParser parse offs
-          where filterAddrs (I.Switch off I.SWA len addrs) = I.Switch off I.SWA len $ take (fromIntegral $ head $ filter isNotCode [off + 3..off + 3 + fromIntegral (length addrs)] ++ [0]) addrs
+          where under = postProcess underlying offs funcs
+                filterAddrs (I.Switch off I.SWA len addrs) = I.Switch off I.SWA len $ map snd $ takeWhile (\(i, _) -> isNotCode $ 2 * i + off + 3) $ zip [0..] addrs
                 filterAddrs i = i
-                isNotCode a = null $ instructionsMatching (\i -> a == I.offset i || a + 1 == I.offset i) funcs
-                repaired = mapInstructions filterAddrs $ postProcess underlying offs funcs
+                isNotCode a = null $ instructionsMatching (\i -> a < I.nextAddr i && a + 1 >= I.offset i) under
+                repaired = mapInstructions filterAddrs under
                 flattened = foldr Map.union Map.empty $ Map.elems repaired
                 parse = (!) flattened
 
