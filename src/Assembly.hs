@@ -76,6 +76,7 @@ data Opcode = ADC |
   SEC |
   SED |
   SEI |
+  SLP |
   STA |
   STX |
   STY |
@@ -150,6 +151,7 @@ nextAddr inst = offset inst + binLength inst
 followingAddrs :: Instruction -> [Word16]
 followingAddrs (Absolute _ JMP addr) = [addr]
 followingAddrs (Implied _ RTS) = []
+followingAddrs (Implied _ SLP) = []
 followingAddrs (Indirect _ JMP _) = []
 followingAddrs inst@(Relative off _ arg) = [nextAddr inst, fromIntegral $ offset + 2 + fromIntegral arg]
   where offset :: Int = fromIntegral off

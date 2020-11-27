@@ -3,14 +3,17 @@
 game.a: game.o
 	ar -csr $@ $^
 
-game.o: game.ll
+game.o: game-opt.ll
 	llc -O3 -filetype=obj -o $@ $^
 
-game.ll: rom.nes
-	nester-exe $^ > $@
+game.ll: game.nes
+	nester-exe llvm $^ $@
 
 game-opt.ll: game.ll
-	opt -S -O3 $^ -o $@
+	opt -O3 $^ -o $@
+
+game.as: game.nes
+	nester-exe decompile $^ $@
 
 clean:
-	rm -f *.ll
+	rm -f *.ll *.as

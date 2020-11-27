@@ -43,12 +43,20 @@ writeCallbackType = FunctionType {
   isVarArg = False
 }
 
+sleepCallbackType :: Type
+sleepCallbackType = FunctionType {
+  resultType = VoidType,
+  argumentTypes = [],
+  isVarArg = False
+}
+
 callbacksStructDef :: Definition
 callbacksStructDef = TypeDefinition "struct.callbacks" $ Just StructureType {
     isPacked = False,
     elementTypes = [
       ptr readCallbackType,
-      ptr writeCallbackType
+      ptr writeCallbackType,
+      ptr sleepCallbackType
     ]
   }
 
@@ -65,6 +73,12 @@ getWriteCallback :: Operand -> IRBuilder Operand
 getWriteCallback cb = do
   addr <- emitInstr (ptr $ ptr writeCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
             ConstantOperand $ C.Int 32 1] []
+  load addr 0
+
+getSleepCallback :: Operand -> IRBuilder Operand
+getSleepCallback cb = do
+  addr <- emitInstr (ptr $ ptr sleepCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
+            ConstantOperand $ C.Int 32 2] []
   load addr 0
 
 memDef :: Definition
@@ -445,6 +459,10 @@ toIR_ _ inst@(I.Implied _ I.INY) = do
   store regY 0 newY
   setNZ newY
   brNext inst
+toIR_ cb (I.Implied _ I.SLP) = do
+  sleep <- getSleepCallback cb
+  call sleep []
+  retVoid
 toIR_ _ inst@(I.Implied _ I.TAY) = do
   a <- load regA 0
   store regY 0 a

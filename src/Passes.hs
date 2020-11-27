@@ -1,6 +1,7 @@
 module Passes (
   functionBodies,
   passBase,
+  selfLoopPass,
   smbSwitchPass
 ) where
 
@@ -28,6 +29,17 @@ passBase = Parser {
   readInstruction = I.readInstruction
 }
 
+mapInstructions :: (I.Instruction -> I.Instruction) -> Map Word16 (Map Word16 I.Instruction) -> Map Word16 (Map Word16 I.Instruction)
+mapInstructions f = Map.map (Map.map f)
+
+instructionsMatching :: (I.Instruction -> Bool) -> Map Word16 (Map Word16 I.Instruction) -> [I.Instruction]
+instructionsMatching f = filter f . instructions
+
+instructions :: Map Word16 (Map Word16 I.Instruction) -> [I.Instruction]
+instructions funcs = do
+  body <- Map.elems funcs
+  Map.elems body
+
 smbSwitchPass :: Pass
 smbSwitchPass underlying = Parser {
     postProcess = postProcess_,
@@ -49,13 +61,14 @@ smbSwitchPass underlying = Parser {
                 flattened = foldr Map.union Map.empty $ Map.elems repaired
                 parse = (!) flattened
 
-mapInstructions :: (I.Instruction -> I.Instruction) -> Map Word16 (Map Word16 I.Instruction) -> Map Word16 (Map Word16 I.Instruction)
-mapInstructions f = Map.map (Map.map f)
-
-instructionsMatching :: (I.Instruction -> Bool) -> Map Word16 (Map Word16 I.Instruction) -> [I.Instruction]
-instructionsMatching f = filter f . instructions
-
-instructions :: Map Word16 (Map Word16 I.Instruction) -> [I.Instruction]
-instructions funcs = do
-  body <- Map.elems funcs
-  Map.elems body
+selfLoopPass :: Pass
+selfLoopPass underlying = Parser {
+    postProcess = postProcess_,
+    readInstruction = readInstruction_
+  }
+  where readInstruction_ off = do
+          inst <- readInstruction underlying off
+          return $ case inst of
+            (I.Absolute off I.JMP arg) -> if off == arg then I.Implied off I.SLP else inst
+            i -> i
+        postProcess_ = postProcess underlying

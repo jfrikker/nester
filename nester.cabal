@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: eab75e31cab8f5090755ee3779a66d32fe47bad62747febab27655e288b03453
+-- hash: 7655d5f1c90ade9c7d1b9f52d5ea4540c0925c26a1a711d1adf9210d0fdb791e
 
 name:           nester
 version:        0.1.0.0
@@ -48,6 +48,7 @@ library
     , llvm-hs-pure
     , monad-extras
     , mtl
+    , options
     , text
   default-language: Haskell2010
 
@@ -70,6 +71,7 @@ executable nester-exe
     , monad-extras
     , mtl
     , nester
+    , options
     , text
   default-language: Haskell2010
 
@@ -93,5 +95,6 @@ test-suite nester-test
     , monad-extras
     , mtl
     , nester
+    , options
     , text
   default-language: Haskell2010

@@ -6,14 +6,10 @@ import AddressSpace (
   AddressSpace(AddressSpace, readStatic),
   irqAddress,
   nmiAddress,
-  readAddress,
   readRom,
   resetAddress
   )
-import Assembly (
-  readInstructions,
-  toAssembly
-  )
+import Assembly (toAssembly)
 import Data.Binary.Get (
   Decoder(..),
   pushChunk,
@@ -31,9 +27,58 @@ import LLVM.Pretty (ppllvm)
 import Nes.File (
   NesFile(prgRom),
   getNesFile)
-import Passes (functionBodies, passBase, smbSwitchPass)
+import Options(
+  Options(defineOptions),
+  runSubcommand,
+  subcommand
+  )
+import Passes (functionBodies, passBase, selfLoopPass, smbSwitchPass)
 import PyF (fmt)
 import System.Environment (getArgs)
+import System.IO (
+  IOMode(WriteMode),
+  hPrint,
+  hPutStrLn,
+  withFile
+  )
+
+data EmptyOptions = EmptyOptions
+
+instance Options EmptyOptions where
+    defineOptions = pure EmptyOptions
+
+decompile :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
+decompile _ _ [input, output] = do
+  buf <- BS.readFile input
+  let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
+  let mem = mapper0 $ prgRom file
+  withFile output WriteMode $ \h -> do
+    let reset = resetAddress mem
+    hPutStrLn h [fmt|; Reset: {reset:04x}|]
+    let nmi = nmiAddress mem
+    hPutStrLn h [fmt|; NMI: {nmi:04x}|]
+    let irq = irqAddress mem
+    hPutStrLn h [fmt|; IRQ: {irq:04x}|]
+    hPutStrLn h ""
+    let parser = selfLoopPass $ smbSwitchPass passBase
+    let functions = functionBodies parser [reset, nmi, irq] mem
+    for_ (Map.assocs functions) $ \(offset, body) -> do
+      hPutStrLn h ""
+      hPutStrLn h [fmt|{offset:04x}:|]
+      for_ (Map.elems body) $ hPutStrLn h . toAssembly
+
+llvm :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
+llvm _ _ [input, output] = do
+  buf <- BS.readFile input
+  let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
+  let mem = mapper0 $ prgRom file
+  withFile output WriteMode $ \h -> do
+    let reset = resetAddress mem
+    let nmi = nmiAddress mem
+    let irq = irqAddress mem
+    let parser = selfLoopPass $ smbSwitchPass passBase
+    let functions = functionBodies parser [reset, nmi, irq] mem
+    TIO.hPutStrLn h $ ppllvm $ toIRNes functions mem
 
 mapper0 :: BS.ByteString -> AddressSpace
 mapper0 rom = AddressSpace { readStatic = readStatic }
@@ -41,21 +86,4 @@ mapper0 rom = AddressSpace { readStatic = readStatic }
 
 main :: IO ()
 main = do
-  args <- getArgs
-  let file = head args
-  buf <- BS.readFile file
-  let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  let mem = mapper0 $ prgRom file
-  -- print $ resetAddress mem
-  -- print $ irqAddress mem
-  -- print $ nmiAddress mem
-  -- let instructions = take 40 $ readInstructions (resetAddress addressSpace) addressSpace
-  -- let instructions = functionBody 0x90cc addressSpace
-  let parser = smbSwitchPass passBase
-  let functions = functionBodies parser [resetAddress mem, irqAddress mem, nmiAddress mem] mem
-  -- for_ (Map.assocs functions) $ \(offset, body) -> do
-  --   putStrLn ""
-  --   putStrLn [fmt|{offset:04x}:|]
-  --   for_ (Map.elems body) $ putStrLn . toAssembly
-  TIO.putStrLn $ ppllvm $ toIRNes functions mem
-  return ()
+  runSubcommand [subcommand "decompile" decompile, subcommand "llvm" llvm]

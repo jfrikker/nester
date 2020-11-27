@@ -29,6 +29,7 @@ dependencies:
 - llvm-hs-pure
 - monad-extras
 - mtl
+- options
 - PyF
 - text
 
