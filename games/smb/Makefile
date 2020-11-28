@@ -7,13 +7,13 @@ game.o: game-opt.ll
 	llc -O3 -filetype=obj -o $@ $^
 
 game.ll: game.nes
-	nester-exe llvm $^ $@
+	nester llvm $^ $@
 
 game-opt.ll: game.ll
 	opt -O3 $^ -o $@
 
 game.as: game.nes
-	nester-exe decompile $^ $@
+	nester decompile $^ $@
 
 clean:
 	rm -f *.ll *.as

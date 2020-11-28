@@ -28,7 +28,6 @@ instFunctionType = FunctionType {
   isVarArg = False
 }
 
-
 readCallbackType :: Type
 readCallbackType = FunctionType {
   resultType = i8,
@@ -293,11 +292,15 @@ resetDef mem = GlobalDefinition $ functionDefaults {
 nmiDef :: AddressSpace -> Definition
 nmiDef mem = GlobalDefinition $ functionDefaults {
   G.name = "nmi",
-  G.parameters = ([Parameter (ptr callbacksStruct) "callbacks" []], False),
+  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
+                   Parameter (ptr writeCallbackType) "writeCallback" [],
+                   Parameter (ptr sleepCallbackType) "sleepCallback" []], False),
   G.returnType = VoidType,
   G.basicBlocks = body
   }
-  where cb = LocalReference (ptr callbacksStruct) "callbacks"
+  where rcb = LocalReference (ptr readCallbackType) "readCallback"
+        wcb = LocalReference (ptr writeCallbackType) "writeCallback"
+        scb = LocalReference (ptr sleepCallbackType) "sleepCallback"
         body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
           x <- alloca i8 Nothing 0
@@ -307,8 +310,8 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
-          call (functionAtAddr $ nmiAddress mem) [(cb, []), (a, []), (x, []), (y, []), (n, []), (z, []), (v, []),
-            (c, []), (s, [])]
+          call (functionAtAddr $ nmiAddress mem) [(rcb, []), (wcb, []), (scb, []), (a, []), (x, []), (y, []), (n, []),
+            (z, []), (v, []), (c, []), (s, [])]
           retVoid
 
 nesModuleDefs :: [Definition]
@@ -327,7 +330,9 @@ toIRNes funcs mem = defaultModule {
 toIRFunction :: Word16 -> [I.Instruction] -> Definition
 toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   G.name = [fmt|func_{addr:04x}|],
-  G.parameters = ([Parameter (ptr callbacksStruct) "callbacks" [],
+  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
+                   Parameter (ptr writeCallbackType) "writeCallback" [],
+                   Parameter (ptr sleepCallbackType) "sleepCallback" [],
                    Parameter (ptr i8) "regA" [],
                    Parameter (ptr i8) "regX" [], Parameter (ptr i8) "regY" [],
                    Parameter (ptr i1) "regN" [], Parameter (ptr i1) "regZ" [],
@@ -341,7 +346,7 @@ toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   where callbacks = LocalReference (ptr callbacksStruct) "callbacks"
         body = execIRBuilder emptyIRBuilder $ mdo
           block `named` "entry"
-          localCb <- alloca callbacksStruct Nothing 0
+          localCb <- alloca readCallbackType Nothing 0
           readSrc <- emitInstr (ptr $ ptr readCallbackType) $ GetElementPtr True callbacks [ConstantOperand $ C.Int 32 0,
                     ConstantOperand $ C.Int 32 0] []
           readTgt <- emitInstr (ptr $ ptr readCallbackType) $ GetElementPtr True localCb [ConstantOperand $ C.Int 32 0,
