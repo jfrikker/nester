@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6aa5ac72686e49f1817d39a76514b50627c5bc35df6a9100d76d262a0f07321a
+-- hash: 04d85736e79c4565e0bc170e7c70222beb392803a17819e4ca935c23dc48fd75
 
 name:           nester-runtime
 version:        0.1.0.0
@@ -30,7 +30,7 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
-    , derive-storable
+      PyF
+    , base >=4.7 && <5
     , mtl
   default-language: Haskell2010
