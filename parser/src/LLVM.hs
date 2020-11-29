@@ -358,7 +358,7 @@ toIR inst = do
 
 toIR_ :: I.Instruction -> IRBuilder ()
 toIR_ inst@(I.Absolute _ I.BIT arg) = do
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") (literalAddr arg)
+  val <- absoluteValue arg
   nval <- lshr val $ literal 7
   nvalTrunc <- trunc nval i1
   store regN 0 nvalTrunc
@@ -370,7 +370,7 @@ toIR_ inst@(I.Absolute _ I.BIT arg) = do
   setZ res
   brNext inst
 toIR_ inst@(I.Absolute _ I.INC arg) = do
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") (literalAddr arg)
+  val <- absoluteValue arg
   res <- add val $ literal 1
   writeMem (LocalReference (ptr writeCallbackType) "writeCallback") (literalAddr arg) res
   setNZ res
@@ -383,94 +383,42 @@ toIR_ inst@(I.Absolute _ I.JSR arg) = do
     (LocalReference (ptr sleepCallbackType) "sleepCallback", []), (regA, []), (regX, []),
     (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, [])]
   brNext inst
-toIR_ inst@(I.Absolute _ I.LDA arg) = do
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") (literalAddr arg)
-  store regA 0 val
-  setNZ val
-  brNext inst
-toIR_ inst@(I.Absolute _ I.STA arg) = do
-  val <- load regA 0
-  writeMem (LocalReference (ptr writeCallbackType) "writeCallback") (literalAddr arg) val
-  brNext inst
-toIR_ inst@(I.AbsoluteX _ I.LDA arg) = do
-  x <- load regX 0
-  xExt <- zext x i16
-  addr <- add xExt $ literalAddr arg
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") addr
-  store regA 0 val
-  setNZ val
-  brNext inst
-toIR_ inst@(I.AbsoluteY _ I.LDA arg) = do
-  y <- load regY 0
-  yExt <- zext y i16
-  addr <- add yExt $ literalAddr arg
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") addr
-  store regA 0 val
-  setNZ val
-  brNext inst
-toIR_ inst@(I.AbsoluteY _ I.STA arg) = do
-  val <- load regA 0
-  y <- load regY 0
-  yExt <- zext y i16
-  addr <- add yExt $ literalAddr arg
-  writeMem (LocalReference (ptr writeCallbackType) "writeCallback") addr val
-  brNext inst
+toIR_ inst@(I.Absolute _ I.LDA arg) = absoluteValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.Absolute _ I.LDX arg) = absoluteValue arg >>= _load regX >> brNext inst
+toIR_ inst@(I.Absolute _ I.LDY arg) = absoluteValue arg >>= _load regY >> brNext inst
+toIR_ inst@(I.Absolute _ I.STA arg) = absoluteAddr arg >>= _store regA >> brNext inst
+toIR_ inst@(I.Absolute _ I.STX arg) = absoluteAddr arg >>= _store regX >> brNext inst
+toIR_ inst@(I.Absolute _ I.STY arg) = absoluteAddr arg >>= _store regY >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.LDA arg) = absoluteXValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.AbsoluteY _ I.LDA arg) = absoluteYValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.AbsoluteY _ I.LDX arg) = absoluteYValue arg >>= _load regX >> brNext inst
+toIR_ inst@(I.AbsoluteY _ I.STA arg) = absoluteYAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.Immediate _ I.AND arg) = do
   a <- load regA 0
   newA <- LLVM.IRBuilder.and a $ literal arg
   store regA 0 newA
   setNZ newA
   brNext inst
-toIR_ inst@(I.Immediate _ I.CMP arg) = do
-  a <- load regA 0
-  (res, carry) <- subCarry a $ literal arg
-  setNZ res
-  store regC 0 carry
-  brNext inst
-toIR_ inst@(I.Immediate _ I.LDA arg) = store regA 0 (literal arg) >> setNZ (literal arg) >> brNext inst
-toIR_ inst@(I.Immediate _ I.LDX arg) = store regX 0 (literal arg) >> setNZ (literal arg) >> brNext inst
-toIR_ inst@(I.Immediate _ I.LDY arg) = store regY 0 (literal arg) >> setNZ (literal arg) >> brNext inst
+toIR_ inst@(I.Immediate _ I.CMP arg) = immediateValue arg >>= _compare regA >> brNext inst
+toIR_ inst@(I.Immediate _ I.CPX arg) = immediateValue arg >>= _compare regX >> brNext inst
+toIR_ inst@(I.Immediate _ I.LDA arg) = immediateValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.Immediate _ I.LDX arg) = immediateValue arg >>= _load regX >> brNext inst
+toIR_ inst@(I.Immediate _ I.LDY arg) = immediateValue arg >>= _load regY >> brNext inst
 toIR_ inst@(I.Immediate _ I.ORA arg) = do
   a <- load regA 0
   newA <- LLVM.IRBuilder.or a $ literal arg
   store regA 0 newA
   setNZ newA
   brNext inst
-toIR_ inst@(I.Implied _ I.DEX) = do
-  x <- load regX 0
-  newX <- sub x $ literal 1
-  store regX 0 newX
-  setNZ newX
-  brNext inst
-toIR_ inst@(I.Implied _ I.DEY) = do
-  y <- load regY 0
-  newY <- sub y $ literal 1
-  store regY 0 newY
-  setNZ newY
-  brNext inst
-toIR_ inst@(I.Implied _ I.INY) = do
-  y <- load regY 0
-  newY <- add y $ literal 1
-  store regY 0 newY
-  setNZ newY
-  brNext inst
+toIR_ inst@(I.Implied _ I.DEX) = _decrement regX >> brNext inst
+toIR_ inst@(I.Implied _ I.DEY) = _decrement regY >> brNext inst
+toIR_ inst@(I.Implied _ I.INY) = _increment regY >> brNext inst
 toIR_ (I.Implied _ I.SLP) = do
   call (LocalReference (ptr sleepCallbackType) "sleepCallback") []
   retVoid
-toIR_ inst@(I.Implied _ I.TAY) = do
-  a <- load regA 0
-  store regY 0 a
-  setNZ a
-  brNext inst
-toIR_ inst@(I.Implied _ I.TXA) = do
-  x <- load regX 0
-  store regA 0 x
-  setNZ x
-  brNext inst
-toIR_ inst@(I.Implied _ I.TXS) = do
-  x <- load regX 0
-  store regS 0 x
-  brNext inst
+toIR_ inst@(I.Implied _ I.TAY) = _transfer regA regY >> brNext inst
+toIR_ inst@(I.Implied _ I.TXA) = _transfer regX regA >> brNext inst
+toIR_ inst@(I.Implied _ I.TXS) = _transfer regX regS >> brNext inst
 toIR_ (I.Implied _ I.RTS) = retVoid
 toIR_ inst@(I.Relative _ I.BCS _) = do
   cond <- load regC 0
@@ -496,14 +444,58 @@ toIR_ (I.Switch _ I.SWA _ tgts) = do
   cond <- load regA 0
   let first = head tgts
   switch cond [fmt|lbl_{first:04x}_0|] $ zipWith (curry (\(i, t) -> (C.Int 8 i, [fmt|lbl_{t:04x}_0|]))) [0..] tgts
-toIR_ inst@(I.Zeropage _ I.LDA arg) = do
-  addr <- zext (literal arg) i16
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") addr
-  store regA 0 val
-  setNZ val
-  brNext inst
+toIR_ inst@(I.Zeropage _ I.LDA arg) = zeropageValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.Zeropage _ I.STA arg) = zeropageAddr arg >>= _store regA >> brNext inst
 toIR_ I.Unknown {} = retVoid -- TODO
 toIR_ inst = brNext inst
+absoluteAddr arg = return $ literalAddr arg
+absoluteValue arg = do
+  addr <- absoluteAddr arg
+  readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+absoluteXAddr arg = do
+  x <- load regX 0
+  xExt <- zext x i16
+  add xExt $ literalAddr arg
+absoluteXValue arg = do
+  addr <- absoluteXAddr arg
+  readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+absoluteYAddr arg = do
+  y <- load regY 0
+  xExt <- zext y i16
+  add xExt $ literalAddr arg
+absoluteYValue arg = do
+  addr <- absoluteYAddr arg
+  readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+immediateValue arg = return $ literal arg
+zeropageAddr arg = zext (literal arg) i16
+zeropageValue arg = do
+  addr <- zeropageAddr arg
+  readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+_compare reg arg = do
+  s <- load reg 0
+  (res, carry) <- subCarry s arg
+  setNZ res
+  store regC 0 carry
+_decrement reg = do
+  s <- load reg 0
+  newS <- sub s $ literal 1
+  store reg 0 newS
+  setNZ newS
+_increment reg = do
+  s <- load reg 0
+  newS <- add s $ literal 1
+  store reg 0 newS
+  setNZ newS
+_load reg val = do
+  store reg 0 val
+  setNZ val
+_store reg addr = do
+  val <- load reg 0
+  writeMem (LocalReference (ptr writeCallbackType) "writeCallback") addr val
+_transfer src tgt = do
+  s <- load src 0
+  store tgt 0 s
+  setNZ s
 
 literal :: Word8 -> Operand
 literal = ConstantOperand . C.Int 8 . fromIntegral
