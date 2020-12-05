@@ -19,7 +19,7 @@ import qualified LLVM.AST.Global as G
 import qualified LLVM.AST.Instruction as LI
 import qualified LLVM.AST.IntegerPredicate as P
 import qualified LLVM.AST.Linkage as L
-import LLVM.AST.Type (i1, i8, i16, ptr)
+import LLVM.AST.Type (i1, i8, i16, i64, ptr)
 import LLVM.IRBuilder
 import PyF (fmt)
 
@@ -375,6 +375,9 @@ toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   }
   where body = execIRBuilder emptyIRBuilder $ mdo
           block `named` "entry"
+          alloca (ArrayType 10 i8) Nothing 0 `named` "stack"
+          sp <- alloca i64 Nothing 0 `named` "sp"
+          store sp 0 $ ConstantOperand $ C.Int 64 0
           br [fmt|lbl_{addr:04x}_0|]
           forM_ insts toIR
 
@@ -472,6 +475,23 @@ toIR_ inst@(I.Implied _ I.DEX) = _decrement regX >> brNext inst
 toIR_ inst@(I.Implied _ I.DEY) = _decrement regY >> brNext inst
 toIR_ inst@(I.Implied _ I.INX) = _increment regX >> brNext inst
 toIR_ inst@(I.Implied _ I.INY) = _increment regY >> brNext inst
+toIR_ inst@(I.Implied _ I.PHA) = do
+  sp <- load (LocalReference (ptr i64) "sp_0") 0
+  a <- load regA 0
+  stackLoc <- emitInstr (ptr i8) $ GetElementPtr True (LocalReference (ptr (ArrayType 10 i8)) "stack_0") [ConstantOperand $ C.Int 32 0, sp] []
+  store stackLoc 0 a
+  newSp <- add sp $ ConstantOperand $ C.Int 64 1
+  store (LocalReference (ptr i64) "sp_0") 0 newSp
+  brNext inst
+toIR_ inst@(I.Implied _ I.PLA) = do
+  sp <- load (LocalReference (ptr i64) "sp_0") 0
+  newSp <- sub sp $ ConstantOperand $ C.Int 64 1
+  stackLoc <- emitInstr (ptr i8) $ GetElementPtr True (LocalReference (ptr (ArrayType 10 i8)) "stack_0") [ConstantOperand $ C.Int 32 0, sp] []
+  a <- load stackLoc 0
+  store regA 0 a
+  store (LocalReference (ptr i64) "sp_0") 0 newSp
+  setNZ a
+  brNext inst
 toIR_ (I.Implied _ I.RTI) = retVoid
 toIR_ (I.Implied _ I.RTS) = retVoid
 toIR_ inst@(I.Implied _ I.SEC) = do
