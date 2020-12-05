@@ -24,7 +24,7 @@ import PyF (fmt)
 instFunctionType :: Type
 instFunctionType = FunctionType {
   resultType = VoidType,
-  argumentTypes = [ptr callbacksStruct],
+  argumentTypes = [ptr readCallbackType, ptr writeCallbackType, ptr sleepCallbackType],
   isVarArg = False
 }
 
@@ -48,37 +48,6 @@ sleepCallbackType = FunctionType {
   argumentTypes = [],
   isVarArg = False
 }
-
-callbacksStructDef :: Definition
-callbacksStructDef = TypeDefinition "struct.callbacks" $ Just StructureType {
-    isPacked = False,
-    elementTypes = [
-      ptr readCallbackType,
-      ptr writeCallbackType,
-      ptr sleepCallbackType
-    ]
-  }
-
-callbacksStruct :: Type
-callbacksStruct = NamedTypeReference "struct.callbacks"
-
-getReadCallback :: Operand -> IRBuilder Operand
-getReadCallback cb = do
-  addr <- emitInstr (ptr $ ptr readCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
-            ConstantOperand $ C.Int 32 0] []
-  load addr 0
-
-getWriteCallback :: Operand -> IRBuilder Operand
-getWriteCallback cb = do
-  addr <- emitInstr (ptr $ ptr writeCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
-            ConstantOperand $ C.Int 32 1] []
-  load addr 0
-
-getSleepCallback :: Operand -> IRBuilder Operand
-getSleepCallback cb = do
-  addr <- emitInstr (ptr $ ptr sleepCallbackType) $ GetElementPtr True cb [ConstantOperand $ C.Int 32 0,
-            ConstantOperand $ C.Int 32 2] []
-  load addr 0
 
 memDef :: Definition
 memDef = GlobalDefinition globalVariableDefaults {
@@ -153,6 +122,31 @@ subCarry arg1 arg2 = do
     isVarArg = False
   } "llvm.usub.with.overflow.i8"
 
+addCarryDef :: Definition
+addCarryDef = GlobalDefinition functionDefaults {
+  G.name = "llvm.uadd.with.overflow.i8",
+  G.returnType = StructureType {
+    isPacked = False,
+    elementTypes = [i8, i1]
+  },
+  G.parameters = ([Parameter i8 "a" [], Parameter i8 "b" []], False)
+}
+
+addCarry :: Operand -> Operand -> IRBuilder (Operand, Operand)
+addCarry arg1 arg2 = do
+  resPacked <- call func [(arg1, []), (arg2, [])]
+  res <- extractValue resPacked [0]
+  carry <- extractValue resPacked [1]
+  return (res, carry)
+  where func = ConstantOperand $ C.GlobalReference FunctionType {
+    resultType = StructureType {
+      isPacked = False,
+      elementTypes = [i8, i1]
+    },
+    argumentTypes = [i8, i8],
+    isVarArg = False
+  } "llvm.uadd.with.overflow.i8"
+
 nesReadMemDef :: Definition
 nesReadMemDef = GlobalDefinition $ functionDefaults {
   G.name = "readMem",
@@ -204,7 +198,7 @@ readMem :: Operand -> Operand -> IRBuilder Operand
 readMem callbacks addr = call func [(callbacks, []), (addr, [])]
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = i8,
-    argumentTypes = [ptr callbacksStruct, i16],
+    argumentTypes = [ptr readCallbackType, i16],
     isVarArg = False
   } "readMem"
 
@@ -262,7 +256,7 @@ writeMem :: Operand -> Operand -> Operand -> IRBuilder ()
 writeMem state addr val = void $ call func [(state, []), (addr, []), (val, [])]
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = VoidType,
-    argumentTypes = [ptr callbacksStruct, i16, i8],
+    argumentTypes = [ptr writeCallbackType, i16, i8],
     isVarArg = False
   } "writeMem"
 
@@ -320,7 +314,7 @@ nesModuleDefs :: [Definition]
 nesModuleDefs = [nesReadMemDef, nesWriteMemDef]
 
 moduleDefs :: [Definition]
-moduleDefs = [callbacksStructDef, memDef, subCarryDef]
+moduleDefs = [memDef, subCarryDef, addCarryDef]
 
 toIRNes :: Map Word16 (Map Word16 I.Instruction) -> AddressSpace -> Module
 toIRNes funcs mem = defaultModule {
@@ -387,18 +381,36 @@ toIR_ inst@(I.Absolute _ I.STX arg) = absoluteAddr arg >>= _store regX >> brNext
 toIR_ inst@(I.Absolute _ I.STY arg) = absoluteAddr arg >>= _store regY >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.DEC arg) = absoluteXAddr arg >>= _decrementAddr >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.LDA arg) = absoluteXValue arg >>= _load regA >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.ROR arg) = absoluteXAddr arg >>= _ror >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.ROR arg) = do
+  addr <- absoluteXAddr arg
+  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+  newVal <- _ror val
+  writeMem (LocalReference (ptr writeCallbackType) "writeCallback") addr newVal
+  brNext inst
 toIR_ inst@(I.AbsoluteX _ I.STA arg) = absoluteXAddr arg >>= _store regA >> brNext inst
+toIR_ inst@(I.AbsoluteY _ I.ADC arg) = absoluteYValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.AbsoluteY _ I.LDA arg) = absoluteYValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.AbsoluteY _ I.LDX arg) = absoluteYValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.AbsoluteY _ I.STA arg) = absoluteYAddr arg >>= _store regA >> brNext inst
+toIR_ inst@(I.Accumulator _ I.ASL) = do
+  a <- load regA 0
+  newA <- _asl a
+  store regA 0 newA
+  brNext inst
 toIR_ inst@(I.Accumulator _ I.LSR) = do
   a <- load regA 0
-  newC <- trunc a i1
-  store regC 0 newC
-  newA <- lshr a $ literal 1
+  newA <- _lsr a
   store regA 0 newA
-  setNZ newA
+  brNext inst
+toIR_ inst@(I.Accumulator _ I.ROL) = do
+  a <- load regA 0
+  newA <- _rol a
+  store regA 0 newA
+  brNext inst
+toIR_ inst@(I.Accumulator _ I.ROR) = do
+  a <- load regA 0
+  newA <- _ror a
+  store regA 0 newA
   brNext inst
 toIR_ inst@(I.Immediate _ I.AND arg) = do
   a <- load regA 0
@@ -408,6 +420,8 @@ toIR_ inst@(I.Immediate _ I.AND arg) = do
   brNext inst
 toIR_ inst@(I.Immediate _ I.CMP arg) = immediateValue arg >>= _compare regA >> brNext inst
 toIR_ inst@(I.Immediate _ I.CPX arg) = immediateValue arg >>= _compare regX >> brNext inst
+toIR_ inst@(I.Immediate _ I.CPY arg) = immediateValue arg >>= _compare regY >> brNext inst
+toIR_ inst@(I.Immediate _ I.EOR arg) = immediateValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDA arg) = immediateValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDX arg) = immediateValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDY arg) = immediateValue arg >>= _load regY >> brNext inst
@@ -432,9 +446,16 @@ toIR_ inst@(I.Implied _ I.SEC) = do
 toIR_ (I.Implied _ I.SLP) = do
   call (LocalReference (ptr sleepCallbackType) "sleepCallback") []
   retVoid
+toIR_ inst@(I.Implied _ I.TAX) = _transfer regA regX >> brNext inst
 toIR_ inst@(I.Implied _ I.TAY) = _transfer regA regY >> brNext inst
 toIR_ inst@(I.Implied _ I.TXA) = _transfer regX regA >> brNext inst
 toIR_ inst@(I.Implied _ I.TXS) = _transfer regX regS >> brNext inst
+toIR_ inst@(I.IndirectY _ I.STA arg) = indirectYAddr arg >>= _store regA >> brNext inst
+toIR_ inst@(I.Relative _ I.BCC _) = do
+  cond <- load regC 0
+  let next = I.nextAddr inst
+  let branch = I.followingAddrs inst !! 1
+  condBr cond [fmt|lbl_{next:04x}_0|] [fmt|lbl_{branch:04x}_0|] 
 toIR_ inst@(I.Relative _ I.BCS _) = do
   cond <- load regC 0
   let next = I.nextAddr inst
@@ -445,6 +466,11 @@ toIR_ inst@(I.Relative _ I.BEQ _) = do
   let next = I.nextAddr inst
   let branch = I.followingAddrs inst !! 1
   condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|]
+toIR_ inst@(I.Relative _ I.BMI _) = do
+  cond <- load regN 0
+  let next = I.nextAddr inst
+  let branch = I.followingAddrs inst !! 1
+  condBr cond [fmt|lbl_{branch:04x}_0|] [fmt|lbl_{next:04x}_0|] 
 toIR_ inst@(I.Relative _ I.BNE _) = do
   cond <- load regZ 0
   let next = I.nextAddr inst
@@ -459,6 +485,8 @@ toIR_ (I.Switch _ I.SWA _ tgts) = do
   cond <- load regA 0
   let first = head tgts
   switch cond [fmt|lbl_{first:04x}_0|] $ zipWith (curry (\(i, t) -> (C.Int 8 i, [fmt|lbl_{t:04x}_0|]))) [0..] tgts
+toIR_ inst@(I.Zeropage _ I.ADC arg) = zeropageValue arg >>= _adc >> brNext inst
+toIR_ inst@(I.Zeropage _ I.CMP arg) = zeropageValue arg >>= _compare regA >> brNext inst
 toIR_ inst@(I.Zeropage _ I.EOR arg) = zeropageValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.Zeropage _ I.INC arg) = zeropageAddr arg >>= _incrementAddr >> brNext inst
 toIR_ inst@(I.Zeropage _ I.LDA arg) = zeropageValue arg >>= _load regA >> brNext inst
@@ -467,6 +495,7 @@ toIR_ inst@(I.Zeropage _ I.STX arg) = zeropageAddr arg >>= _store regX >> brNext
 toIR_ inst@(I.Zeropage _ I.STY arg) = zeropageAddr arg >>= _store regY >> brNext inst
 toIR_ I.Unknown {} = retVoid -- TODO
 toIR_ inst = brNext inst
+
 absoluteAddr arg = return $ literalAddr arg
 absoluteValue arg = do
   addr <- absoluteAddr arg
@@ -480,16 +509,47 @@ absoluteXValue arg = do
   readMem (LocalReference (ptr readCallbackType) "readCallback") addr
 absoluteYAddr arg = do
   y <- load regY 0
-  xExt <- zext y i16
-  add xExt $ literalAddr arg
+  yExt <- zext y i16
+  add yExt $ literalAddr arg
 absoluteYValue arg = do
   addr <- absoluteYAddr arg
   readMem (LocalReference (ptr readCallbackType) "readCallback") addr
 immediateValue arg = return $ literal arg
+indirectYAddr arg = do
+  addrLow <- zext (literal arg) i16
+  low <- readMem (LocalReference (ptr readCallbackType) "readCallback") addrLow
+  addrHigh <- add addrLow $ literal 1
+  high <- readMem (LocalReference (ptr readCallbackType) "readCallback") addrHigh
+  lowExt <- zext low i16
+  highExt <- zext high i16
+  highShift <- shl highExt $ literalAddr 8
+  addr <- add lowExt highShift
+  y <- load regY 0
+  yExt <- zext y i16
+  add addr yExt
+indirectYValue arg = do
+  addr <- indirectYAddr arg
+  readMem (LocalReference (ptr readCallbackType) "readCallback") addr
 zeropageAddr arg = zext (literal arg) i16
 zeropageValue arg = do
   addr <- zeropageAddr arg
   readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+_adc arg = do
+  c <- load regC 0
+  cExt <- zext c i8
+  v1 <- load regA 0
+  (v2, c2) <- addCarry v1 cExt
+  (v3, c3) <- addCarry v2 arg
+  setNZ v3
+  carry <- LLVM.IRBuilder.or c2 c3
+  store regC 0 carry
+_asl val = do
+  newC1 <- lshr val $ literal 7
+  newC2 <- trunc newC1 i1
+  newVal <- shl val $ literal 1
+  store regC 0 newC2
+  setNZ newVal
+  return newVal
 _compare reg arg = do
   s <- load reg 0
   (res, carry) <- subCarry s arg
@@ -523,8 +583,23 @@ _incrementAddr addr = do
 _load reg val = do
   store reg 0 val
   setNZ val
-_ror addr = do
-  val <- readMem (LocalReference (ptr readCallbackType) "readCallback") addr
+_lsr val = do
+  newC <- trunc val i1
+  store regC 0 newC
+  newVal <- lshr val $ literal 1
+  setNZ newVal
+  return newVal
+_rol val = do
+  c <- load regC 0
+  newC1 <- lshr val $ literal 7
+  newC2 <- trunc newC1 i1
+  newVal1 <- shl val $ literal 1
+  cExt <- sext c i8
+  newVal2 <- LLVM.IRBuilder.or newVal1 cExt
+  store regC 0 newC2
+  setNZ newVal2
+  return newVal2
+_ror val = do
   c <- load regC 0
   newC <- trunc val i1
   newVal <- lshr val $ literal 1
@@ -532,8 +607,8 @@ _ror addr = do
   cExt2 <- LLVM.IRBuilder.and cExt $ literal 0x80
   newVal2 <- LLVM.IRBuilder.or newVal cExt2
   store regC 0 newC
-  writeMem (LocalReference (ptr writeCallbackType) "writeCallback") addr newVal2
   setNZ newVal2
+  return newVal2
 _store reg addr = do
   val <- load reg 0
   writeMem (LocalReference (ptr writeCallbackType) "writeCallback") addr val

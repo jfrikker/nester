@@ -150,6 +150,7 @@ nextAddr inst = offset inst + binLength inst
 
 followingAddrs :: Instruction -> [Word16]
 followingAddrs (Absolute _ JMP addr) = [addr]
+followingAddrs (Implied _ RTI) = []
 followingAddrs (Implied _ RTS) = []
 followingAddrs (Implied _ SLP) = []
 followingAddrs (Indirect _ JMP _) = []
