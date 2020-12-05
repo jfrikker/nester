@@ -78,7 +78,7 @@ llvm _ _ [input, output] = do
     let irq = irqAddress mem
     let parser = selfLoopPass $ smbSwitchPass passBase
     let functions = functionBodies parser [reset, nmi, irq] mem
-    TIO.hPutStrLn h $ ppllvm $ toIRNes functions mem
+    TIO.hPutStrLn h $ ppllvm $ toIRNes functions (prgRom file) mem
 
 mapper0 :: BS.ByteString -> AddressSpace
 mapper0 rom = AddressSpace { readStatic = readStatic }

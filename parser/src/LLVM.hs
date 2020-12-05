@@ -6,6 +6,8 @@ module LLVM (
 import AddressSpace(AddressSpace, nmiAddress, resetAddress)
 import qualified Assembly as I
 import Control.Monad (forM_, void)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Word (Word8, Word16)
@@ -69,6 +71,26 @@ setMemValue :: Operand -> Operand -> IRBuilder ()
 setMemValue addr val = do
   addr' <- emitInstr (ptr i8) $ GetElementPtr True mem [ConstantOperand $ C.Int 32 0, addr] []
   store addr' 0 val
+
+prgRomDef :: ByteString -> Definition
+prgRomDef rom = GlobalDefinition globalVariableDefaults {
+  G.name = "prgRom",
+  G.type' = ArrayType 32768 i8,
+  G.linkage = L.Private,
+  G.isConstant = True,
+  G.initializer = Just $ C.Array {
+    C.memberType = i8,
+    C.memberValues = map (C.Int 8 . fromIntegral) $ BS.unpack rom
+  }
+}
+
+prgRom :: Operand
+prgRom = ConstantOperand $ C.GlobalReference (ptr $ ArrayType 32768 i8) "prgRom"
+
+getRomValue :: Operand -> IRBuilder Operand
+getRomValue addr = do
+  addr' <- emitInstr (ptr i8) $ GetElementPtr True prgRom [ConstantOperand $ C.Int 32 0, addr] []
+  load addr' 0
 
 regRef :: Type -> Name -> Operand
 regRef type' = LocalReference (ptr type')
@@ -176,13 +198,20 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
           ret ppuVal
           elsePpu <- block `named` "elsePpu"
           condApu <- icmp P.ULT addr $ literalAddr 0x4020
-          condBr condApu ifApu end
+          condBr condApu ifApu elseApu
           ifApu <- block `named` "ifApu"
           apuVal <- doReadCallback addr
           ret apuVal
-          end <- block `named` "end"
+          elseApu <- block `named` "elseApu"
+          condRam <- icmp P.ULT addr $ literalAddr 0x8000
+          condBr condRam ifRam end
+          ifRam <- block `named` "ifRam"
           memVal <- getMemValue addr
           ret memVal
+          end <- block `named` "end"
+          romAddr <- sub addr $ literalAddr 0x8000
+          romVal <- getRomValue romAddr
+          ret romVal
         doReadCallback addr = do
           emitInstr i8 $ Call {
             tailCallKind = Nothing,
@@ -233,12 +262,17 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
           retVoid
           elsePpu <- block `named` "elsePpu"
           condApu <- icmp P.ULT addr $ literalAddr 0x4020
-          condBr condApu ifApu end
+          condBr condApu ifApu elseApu
           ifApu <- block `named` "ifApu"
           doWriteCallback addr
           retVoid
-          end <- block `named` "end"
+          elseApu <- block `named` "elseApu"
+          condRam <- icmp P.ULT addr $ literalAddr 0x8000
+          condBr condRam ifRam end
+          ifRam <- block `named` "ifRam"
           setMemValue addr val
+          retVoid
+          end <- block `named` "end"
           retVoid
         doWriteCallback addr = do
           emitInstrVoid $ Call {
@@ -316,10 +350,10 @@ nesModuleDefs = [nesReadMemDef, nesWriteMemDef]
 moduleDefs :: [Definition]
 moduleDefs = [memDef, subCarryDef, addCarryDef]
 
-toIRNes :: Map Word16 (Map Word16 I.Instruction) -> AddressSpace -> Module
-toIRNes funcs mem = defaultModule {
+toIRNes :: Map Word16 (Map Word16 I.Instruction) -> ByteString -> AddressSpace -> Module
+toIRNes funcs rom mem = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, nmiDef mem] ++ irFuncs
+  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, nmiDef mem, prgRomDef rom] ++ irFuncs
   }
   where irFuncs = map (\(off, body) -> toIRFunction off $ Map.elems body) $ Map.assocs funcs
 
