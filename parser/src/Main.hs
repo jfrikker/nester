@@ -47,8 +47,8 @@ data EmptyOptions = EmptyOptions
 instance Options EmptyOptions where
     defineOptions = pure EmptyOptions
 
-decompile :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
-decompile _ _ [input, output] = do
+disassemble :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
+disassemble _ _ [input, output] = do
   buf <- BS.readFile input
   let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
   let mem = mapper0 $ prgRom file
@@ -86,4 +86,4 @@ mapper0 rom = AddressSpace { readStatic = readStatic }
 
 main :: IO ()
 main = do
-  runSubcommand [subcommand "decompile" decompile, subcommand "llvm" llvm]
+  runSubcommand [subcommand "disassemble" disassemble, subcommand "llvm" llvm]

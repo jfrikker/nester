@@ -16,7 +16,7 @@ game-opt.ll: game.ll
 	opt -O3 $^ -o $@
 
 game.as: game.nes
-	nester decompile $^ $@
+	nester disassemble $^ $@
 
 clean:
-	rm -f *.ll *.as
+	rm -f *.ll *.as *.hi *.o *.a game
