@@ -219,7 +219,7 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
             returnAttributes = [],
             LI.function = Right readCallback,
             arguments = [(addr, [])],
-            functionAttributes = [],
+            functionAttributes = [Right FA.ReadNone],
             metadata = []
           }
 
@@ -281,10 +281,9 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
             returnAttributes = [],
             LI.function = Right writeCallback,
             arguments = [(addr, []), (val, [])],
-            functionAttributes = [],
+            functionAttributes = [Right FA.ReadNone],
             metadata = []
           }
-
 
 writeMem :: Operand -> Operand -> IRBuilder ()
 writeMem addr val = void $ call func [(LocalReference (ptr writeCallbackType) "writeCallback", []), (addr, []), (val, [])]
