@@ -2,6 +2,7 @@
 
 module NesterRuntime.CPU (
   RomM,
+  nmi,
   reset
 ) where
 
@@ -10,11 +11,11 @@ import qualified Control.Monad.State as State
 import Data.IORef (newIORef, writeIORef, readIORef, IORef)
 import Data.Word(Word8, Word16)
 import Foreign (
-  FunPtr,
-  nullFunPtr
+  FunPtr
   )
 
-foreign import ccall "reset" romReset :: FunPtr (Word16 -> IO Word8) -> FunPtr (Word16 -> Word8 -> IO ()) -> FunPtr (() -> IO ()) -> IO ()
+foreign import ccall "reset" romReset :: FunPtr (Word16 -> IO Word8) -> FunPtr (Word16 -> Word8 -> IO ()) -> IO ()
+foreign import ccall "nmi" romNmi :: FunPtr (Word16 -> IO Word8) -> FunPtr (Word16 -> Word8 -> IO ()) -> IO ()
 foreign import ccall "wrapper" mkReadCb :: (Word16 -> IO Word8) -> IO (FunPtr (Word16 -> IO Word8))
 foreign import ccall "wrapper" mkWriteCb :: (Word16 -> Word8 -> IO ()) -> IO (FunPtr (Word16 -> Word8 -> IO ()))
 
@@ -40,5 +41,12 @@ reset read write = do
   ref <- liftIO $ newIORef current
   rc <- liftIO $ mkReadCb $ realReadCallback ref read
   wc <- liftIO $ mkWriteCb $ realWriteCallback ref write
-  let sc = nullFunPtr
-  liftIO $ romReset rc wc sc
+  liftIO $ romReset rc wc
+
+nmi :: (Word16 -> RomM s Word8) -> (Word16 -> Word8 -> RomM s ()) -> RomM s ()
+nmi read write = do
+  current <- State.get
+  ref <- liftIO $ newIORef current
+  rc <- liftIO $ mkReadCb $ realReadCallback ref read
+  wc <- liftIO $ mkWriteCb $ realWriteCallback ref write
+  liftIO $ romNmi rc wc

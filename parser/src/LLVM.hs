@@ -26,7 +26,7 @@ import PyF (fmt)
 instFunctionType :: Type
 instFunctionType = FunctionType {
   resultType = VoidType,
-  argumentTypes = [ptr readCallbackType, ptr writeCallbackType, ptr sleepCallbackType],
+  argumentTypes = [ptr readCallbackType, ptr writeCallbackType],
   isVarArg = False
 }
 
@@ -41,13 +41,6 @@ writeCallbackType :: Type
 writeCallbackType = FunctionType {
   resultType = VoidType,
   argumentTypes = [i16, i8],
-  isVarArg = False
-}
-
-sleepCallbackType :: Type
-sleepCallbackType = FunctionType {
-  resultType = VoidType,
-  argumentTypes = [],
   isVarArg = False
 }
 
@@ -297,14 +290,12 @@ resetDef :: AddressSpace -> Definition
 resetDef mem = GlobalDefinition $ functionDefaults {
   G.name = "reset",
   G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
-                   Parameter (ptr writeCallbackType) "writeCallback" [],
-                   Parameter (ptr sleepCallbackType) "sleepCallback" []], False),
+                   Parameter (ptr writeCallbackType) "writeCallback" []], False),
   G.returnType = VoidType,
   G.basicBlocks = body
   }
   where rcb = LocalReference (ptr readCallbackType) "readCallback"
         wcb = LocalReference (ptr writeCallbackType) "writeCallback"
-        scb = LocalReference (ptr sleepCallbackType) "sleepCallback"
         body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
           x <- alloca i8 Nothing 0
@@ -314,7 +305,7 @@ resetDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
-          call (functionAtAddr $ resetAddress mem) [(rcb, []), (wcb, []), (scb, []), (a, []), (x, []), (y, []), (n, []),
+          call (functionAtAddr $ resetAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, [])]
           retVoid
 
@@ -322,14 +313,12 @@ nmiDef :: AddressSpace -> Definition
 nmiDef mem = GlobalDefinition $ functionDefaults {
   G.name = "nmi",
   G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
-                   Parameter (ptr writeCallbackType) "writeCallback" [],
-                   Parameter (ptr sleepCallbackType) "sleepCallback" []], False),
+                   Parameter (ptr writeCallbackType) "writeCallback" []], False),
   G.returnType = VoidType,
   G.basicBlocks = body
   }
   where rcb = LocalReference (ptr readCallbackType) "readCallback"
         wcb = LocalReference (ptr writeCallbackType) "writeCallback"
-        scb = LocalReference (ptr sleepCallbackType) "sleepCallback"
         body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
           x <- alloca i8 Nothing 0
@@ -339,7 +328,7 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
-          call (functionAtAddr $ nmiAddress mem) [(rcb, []), (wcb, []), (scb, []), (a, []), (x, []), (y, []), (n, []),
+          call (functionAtAddr $ nmiAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, [])]
           retVoid
 
@@ -361,7 +350,6 @@ toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   G.name = [fmt|func_{addr:04x}|],
   G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
                    Parameter (ptr writeCallbackType) "writeCallback" [],
-                   Parameter (ptr sleepCallbackType) "sleepCallback" [],
                    Parameter (ptr i8) "regA" [],
                    Parameter (ptr i8) "regX" [], Parameter (ptr i8) "regY" [],
                    Parameter (ptr i1) "regN" [], Parameter (ptr i1) "regZ" [],
@@ -398,8 +386,7 @@ toIR_ (I.Absolute _ I.JMP arg) = do
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ inst@(I.Absolute _ I.JSR arg) = do
   call (functionAtAddr arg) [(LocalReference (ptr readCallbackType) "readCallback", []),
-    (LocalReference (ptr writeCallbackType) "writeCallback", []),
-    (LocalReference (ptr sleepCallbackType) "sleepCallback", []), (regA, []), (regX, []),
+    (LocalReference (ptr writeCallbackType) "writeCallback", []), (regA, []), (regX, []),
     (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, [])]
   brNext inst
 toIR_ inst@(I.Absolute _ I.LDA arg) = absoluteValue arg >>= _load regA >> brNext inst
@@ -480,9 +467,7 @@ toIR_ (I.Implied _ I.RTS) = retVoid
 toIR_ inst@(I.Implied _ I.SEC) = do
   store regC 0 $ ConstantOperand $ C.Int 1 1
   brNext inst
-toIR_ (I.Implied _ I.SLP) = do
-  call (LocalReference (ptr sleepCallbackType) "sleepCallback") []
-  retVoid
+toIR_ (I.Implied _ I.SLP) = retVoid
 toIR_ inst@(I.Implied _ I.TAX) = _transfer regA regX >> brNext inst
 toIR_ inst@(I.Implied _ I.TAY) = _transfer regA regY >> brNext inst
 toIR_ inst@(I.Implied _ I.TXA) = _transfer regX regA >> brNext inst
