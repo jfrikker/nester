@@ -392,9 +392,9 @@ toIR_ inst@(I.Absolute _ I.BIT arg) = absoluteValue arg >>= _bit >> brNext inst
 toIR_ inst@(I.Absolute _ I.ADC arg) = absoluteValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.Absolute _ I.AND arg) = absoluteValue arg >>= _and >> brNext inst
 toIR_ inst@(I.Absolute _ I.ASL arg) = absoluteAddr arg >>= _asl >> brNext inst
-toIR_ inst@(I.Absolute _ I.DEC arg) = absoluteAddr arg >>= _decrementAddr >> brNext inst
+toIR_ inst@(I.Absolute _ I.DEC arg) = absoluteAddr arg >>= modifyMem _decrement >> brNext inst
 toIR_ inst@(I.Absolute _ I.EOR arg) = absoluteAddr arg >>= _eor >> brNext inst
-toIR_ inst@(I.Absolute _ I.INC arg) = absoluteAddr arg >>= _incrementAddr >> brNext inst
+toIR_ inst@(I.Absolute _ I.INC arg) = absoluteAddr arg >>= modifyMem _increment >> brNext inst
 toIR_ (I.Absolute _ I.JMP arg) = do
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ inst@(I.Absolute _ I.JSR arg) = do
@@ -406,19 +406,21 @@ toIR_ inst@(I.Absolute _ I.JSR arg) = do
 toIR_ inst@(I.Absolute _ I.LDA arg) = absoluteValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.Absolute _ I.LDX arg) = absoluteValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.Absolute _ I.LDY arg) = absoluteValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.Absolute _ I.LSR arg) = absoluteAddr arg >>= _lsrAddr >> brNext inst
+toIR_ inst@(I.Absolute _ I.LSR arg) = absoluteAddr arg >>= modifyMem _lsr >> brNext inst
+toIR_ inst@(I.Absolute _ I.ORA arg) = absoluteValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.Absolute _ I.STA arg) = absoluteAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.Absolute _ I.STX arg) = absoluteAddr arg >>= _store regX >> brNext inst
 toIR_ inst@(I.Absolute _ I.STY arg) = absoluteAddr arg >>= _store regY >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.ADC arg) = absoluteXValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.AND arg) = absoluteXValue arg >>= _and >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.ASL arg) = absoluteXAddr arg >>= _asl >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.DEC arg) = absoluteXAddr arg >>= _decrementAddr >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.DEC arg) = absoluteXAddr arg >>= modifyMem _decrement >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.EOR arg) = absoluteXAddr arg >>= _eor >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.INC arg) = absoluteXAddr arg >>= _incrementAddr >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.INC arg) = absoluteXAddr arg >>= modifyMem _increment >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.LDA arg) = absoluteXValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.LDY arg) = absoluteXValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.LSR arg) = absoluteXAddr arg >>= _lsrAddr >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.LSR arg) = absoluteXAddr arg >>= modifyMem _lsr >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.ORA arg) = absoluteXValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.ROR arg) = do
   addr <- absoluteXAddr arg
   val <- readMem addr
@@ -431,27 +433,12 @@ toIR_ inst@(I.AbsoluteY _ I.AND arg) = absoluteYValue arg >>= _and >> brNext ins
 toIR_ inst@(I.AbsoluteY _ I.EOR arg) = absoluteYValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.AbsoluteY _ I.LDA arg) = absoluteYValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.AbsoluteY _ I.LDX arg) = absoluteYValue arg >>= _load regX >> brNext inst
+toIR_ inst@(I.AbsoluteY _ I.ORA arg) = absoluteYValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.AbsoluteY _ I.STA arg) = absoluteYAddr arg >>= _store regA >> brNext inst
-toIR_ inst@(I.Accumulator _ I.ASL) = do
-  a <- load regA 0
-  newA <- _asl a
-  store regA 0 newA
-  brNext inst
-toIR_ inst@(I.Accumulator _ I.LSR) = do
-  a <- load regA 0
-  newA <- _lsr a
-  store regA 0 newA
-  brNext inst
-toIR_ inst@(I.Accumulator _ I.ROL) = do
-  a <- load regA 0
-  newA <- _rol a
-  store regA 0 newA
-  brNext inst
-toIR_ inst@(I.Accumulator _ I.ROR) = do
-  a <- load regA 0
-  newA <- _ror a
-  store regA 0 newA
-  brNext inst
+toIR_ inst@(I.Accumulator _ I.ASL) = withAccumulator _asl >> brNext inst
+toIR_ inst@(I.Accumulator _ I.LSR) = withAccumulator _lsr >> brNext inst
+toIR_ inst@(I.Accumulator _ I.ROL) = withAccumulator _rol >> brNext inst
+toIR_ inst@(I.Accumulator _ I.ROR) = withAccumulator _ror >> brNext inst
 toIR_ inst@(I.Immediate _ I.ADC arg) = immediateValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.Immediate _ I.AND arg) = immediateValue arg >>= _and >> brNext inst
 toIR_ inst@(I.Immediate _ I.CMP arg) = immediateValue arg >>= _compare regA >> brNext inst
@@ -461,22 +448,17 @@ toIR_ inst@(I.Immediate _ I.EOR arg) = immediateValue arg >>= _eor >> brNext ins
 toIR_ inst@(I.Immediate _ I.LDA arg) = immediateValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDX arg) = immediateValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDY arg) = immediateValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.Immediate _ I.ORA arg) = do
-  a <- load regA 0
-  newA <- LLVM.IRBuilder.or a $ literal arg
-  store regA 0 newA
-  setNZ newA
-  brNext inst
+toIR_ inst@(I.Immediate _ I.ORA arg) = immediateValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.Implied _ I.CLC) = do
   store regC 0 $ ConstantOperand $ C.Int 1 0
   brNext inst
 toIR_ inst@(I.Implied _ I.CLV) = do
   store regV 0 $ ConstantOperand $ C.Int 1 0
   brNext inst
-toIR_ inst@(I.Implied _ I.DEX) = _decrement regX >> brNext inst
-toIR_ inst@(I.Implied _ I.DEY) = _decrement regY >> brNext inst
-toIR_ inst@(I.Implied _ I.INX) = _increment regX >> brNext inst
-toIR_ inst@(I.Implied _ I.INY) = _increment regY >> brNext inst
+toIR_ inst@(I.Implied _ I.DEX) = modifyReg _decrement regX >> brNext inst
+toIR_ inst@(I.Implied _ I.DEY) = modifyReg _decrement regY >> brNext inst
+toIR_ inst@(I.Implied _ I.INX) = modifyReg _increment regX >> brNext inst
+toIR_ inst@(I.Implied _ I.INY) = modifyReg _increment regY >> brNext inst
 toIR_ inst@(I.Implied _ I.PHA) = do
   sp <- load (LocalReference (ptr i64) "sp_0") 0
   a <- load regA 0
@@ -510,10 +492,12 @@ toIR_ inst@(I.IndirectX _ I.ADC arg) = indirectXValue arg >>= _adc >> brNext ins
 toIR_ inst@(I.IndirectX _ I.AND arg) = indirectXValue arg >>= _and >> brNext inst
 toIR_ inst@(I.IndirectX _ I.EOR arg) = indirectXValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.IndirectX _ I.LDA arg) = indirectXValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.IndirectX _ I.ORA arg) = indirectXValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.IndirectY _ I.ADC arg) = indirectYValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.IndirectY _ I.AND arg) = indirectYValue arg >>= _and >> brNext inst
 toIR_ inst@(I.IndirectY _ I.EOR arg) = indirectYValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.IndirectY _ I.LDA arg) = indirectYValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.IndirectY _ I.ORA arg) = indirectYValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.IndirectY _ I.STA arg) = indirectYAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.Relative _ I.BCC _) = do
   cond <- load regC 0
@@ -564,25 +548,27 @@ toIR_ inst@(I.Zeropage _ I.AND arg) = zeropageValue arg >>= _and >> brNext inst
 toIR_ inst@(I.Zeropage _ I.ASL arg) = zeropageAddr arg >>= _asl >> brNext inst
 toIR_ inst@(I.Zeropage _ I.BIT arg) = zeropageValue arg >>= _bit >> brNext inst
 toIR_ inst@(I.Zeropage _ I.CMP arg) = zeropageValue arg >>= _compare regA >> brNext inst
-toIR_ inst@(I.Zeropage _ I.DEC arg) = zeropageAddr arg >>= _decrementAddr >> brNext inst
+toIR_ inst@(I.Zeropage _ I.DEC arg) = zeropageAddr arg >>= modifyMem _decrement >> brNext inst
 toIR_ inst@(I.Zeropage _ I.EOR arg) = zeropageValue arg >>= _eor >> brNext inst
-toIR_ inst@(I.Zeropage _ I.INC arg) = zeropageAddr arg >>= _incrementAddr >> brNext inst
+toIR_ inst@(I.Zeropage _ I.INC arg) = zeropageAddr arg >>= modifyMem _increment >> brNext inst
 toIR_ inst@(I.Zeropage _ I.LDA arg) = zeropageValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.Zeropage _ I.LDX arg) = zeropageValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.Zeropage _ I.LDY arg) = zeropageValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.Zeropage _ I.LSR arg) = zeropageAddr arg >>= _lsrAddr >> brNext inst
+toIR_ inst@(I.Zeropage _ I.LSR arg) = zeropageAddr arg >>= modifyMem _lsr >> brNext inst
+toIR_ inst@(I.Zeropage _ I.ORA arg) = zeropageValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.Zeropage _ I.STA arg) = zeropageAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.Zeropage _ I.STX arg) = zeropageAddr arg >>= _store regX >> brNext inst
 toIR_ inst@(I.Zeropage _ I.STY arg) = zeropageAddr arg >>= _store regY >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.ADC arg) = zeropageXValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.AND arg) = zeropageXValue arg >>= _and >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.ASL arg) = zeropageXAddr arg >>= _asl >> brNext inst
-toIR_ inst@(I.ZeropageX _ I.DEC arg) = zeropageXAddr arg >>= _decrementAddr >> brNext inst
+toIR_ inst@(I.ZeropageX _ I.DEC arg) = zeropageXAddr arg >>= modifyMem _decrement >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.EOR arg) = zeropageXAddr arg >>= _eor >> brNext inst
-toIR_ inst@(I.ZeropageX _ I.INC arg) = zeropageXAddr arg >>= _incrementAddr >> brNext inst
+toIR_ inst@(I.ZeropageX _ I.INC arg) = zeropageXAddr arg >>= modifyMem _increment >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.LDA arg) = zeropageXValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.LDY arg) = zeropageXValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.ZeropageX _ I.LSR arg) = zeropageXValue arg >>= _lsrAddr >> brNext inst
+toIR_ inst@(I.ZeropageX _ I.LSR arg) = zeropageXValue arg >>= modifyMem _lsr >> brNext inst
+toIR_ inst@(I.ZeropageX _ I.ORA arg) = zeropageXValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.STA arg) = zeropageXAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.ZeropageY _ I.LDX arg) = zeropageYValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.ZeropageY _ I.STA arg) = zeropageYAddr arg >>= _store regA >> brNext inst
@@ -637,6 +623,18 @@ indirectYAddr arg = do
 indirectYValue arg = do
   addr <- indirectYAddr arg
   readMem addr
+modifyMem f addr = do
+  val <- readMem addr
+  newVal <- f val
+  writeMem addr newVal
+modifyReg f reg = do
+  val <- load reg 0
+  newVal <- f val
+  store reg 0 newVal
+withAccumulator f = do
+  a <- load regA 0
+  newA <- f a
+  store regA 0 newA
 zeropageAddr arg = zext (literal arg) i16
 zeropageValue arg = do
   addr <- zeropageAddr arg
@@ -677,10 +675,6 @@ _asl val = do
   store regC 0 newC2
   setNZ newVal
   return newVal
-_aslAddr addr = do
-  before <- readMem addr
-  after <- _asl before
-  writeMem addr after
 _bit val = do
   nval <- lshr val $ literal 7
   nvalTrunc <- trunc nval i1
@@ -696,31 +690,19 @@ _compare reg arg = do
   (res, carry) <- subCarry s arg
   setNZ res
   store regC 0 carry
-_decrement reg = do
-  s <- load reg 0
-  newS <- sub s $ literal 1
-  store reg 0 newS
-  setNZ newS
-_decrementAddr addr = do
-  val <- readMem addr
-  res <- sub val $ literal 1
-  writeMem addr res
-  setNZ res
+_decrement val = do
+  newVal <- sub val $ literal 1
+  setNZ newVal
+  return newVal
 _eor val = do
   a <- load regA 0
   res <- xor a val
   store regA 0 res
   setNZ res
-_increment reg = do
-  s <- load reg 0
-  newS <- add s $ literal 1
-  store reg 0 newS
-  setNZ newS
-_incrementAddr addr = do
-  val <- readMem addr
-  res <- add val $ literal 1
-  writeMem addr res
-  setNZ res
+_increment val = do
+  newVal <- add val $ literal 1
+  setNZ newVal
+  return newVal
 _load reg val = do
   store reg 0 val
   setNZ val
@@ -730,13 +712,11 @@ _lsr val = do
   newVal <- lshr val $ literal 1
   setNZ newVal
   return newVal
-_lsrAddr addr = do
-  val <- readMem addr
-  newC <- trunc val i1
-  store regC 0 newC
-  newVal <- lshr val $ literal 1
-  setNZ newVal
-  writeMem addr newVal
+_ora arg = do
+  a <- load regA 0
+  newA <- LLVM.IRBuilder.or a arg
+  store regA 0 newA
+  setNZ newA
 _rol val = do
   c <- load regC 0
   newC1 <- lshr val $ literal 7
