@@ -25,7 +25,7 @@ import qualified Data.Text.Lazy.IO as TIO
 import LLVM (toIRNes)
 import LLVM.Pretty (ppllvm)
 import Nes.File (
-  NesFile(prgRom),
+  NesFile(chrRom, prgRom),
   getNesFile)
 import Options(
   Options(defineOptions),
@@ -34,10 +34,8 @@ import Options(
   )
 import Passes (functionBodies, passBase, selfLoopPass, smbSwitchPass)
 import PyF (fmt)
-import System.Environment (getArgs)
 import System.IO (
   IOMode(WriteMode),
-  hPrint,
   hPutStrLn,
   withFile
   )
@@ -78,7 +76,7 @@ llvm _ _ [input, output] = do
     let irq = irqAddress mem
     let parser = selfLoopPass $ smbSwitchPass passBase
     let functions = functionBodies parser [reset, nmi, irq] mem
-    TIO.hPutStrLn h $ ppllvm $ toIRNes functions (prgRom file) mem
+    TIO.hPutStrLn h $ ppllvm $ toIRNes functions (prgRom file) (chrRom file) mem
 
 mapper0 :: BS.ByteString -> AddressSpace
 mapper0 rom = AddressSpace { readStatic = readStatic }

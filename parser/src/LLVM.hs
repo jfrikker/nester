@@ -80,6 +80,18 @@ prgRomDef rom = GlobalDefinition globalVariableDefaults {
 prgRom :: Operand
 prgRom = ConstantOperand $ C.GlobalReference (ptr $ ArrayType 32768 i8) "prgRom"
 
+chrRomDef :: ByteString -> Definition
+chrRomDef rom = GlobalDefinition globalVariableDefaults {
+  G.name = "chrRom",
+  G.type' = ArrayType 8192 i8,
+  G.linkage = L.Private,
+  G.isConstant = True,
+  G.initializer = Just $ C.Array {
+    C.memberType = i8,
+    C.memberValues = map (C.Int 8 . fromIntegral) $ BS.unpack rom
+  }
+}
+
 getRomValue :: Operand -> IRBuilder Operand
 getRomValue addr = do
   addr' <- emitInstr (ptr i8) $ GetElementPtr True prgRom [ConstantOperand $ C.Int 32 0, addr] []
@@ -338,10 +350,10 @@ nesModuleDefs = [nesReadMemDef, nesWriteMemDef]
 moduleDefs :: [Definition]
 moduleDefs = [memDef, subCarryDef, addCarryDef]
 
-toIRNes :: Map Word16 (Map Word16 I.Instruction) -> ByteString -> AddressSpace -> Module
-toIRNes funcs rom mem = defaultModule {
+toIRNes :: Map Word16 (Map Word16 I.Instruction) -> ByteString -> ByteString -> AddressSpace -> Module
+toIRNes funcs rom chrRom mem = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, nmiDef mem, prgRomDef rom] ++ irFuncs
+  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, nmiDef mem, prgRomDef rom, chrRomDef chrRom] ++ irFuncs
   }
   where irFuncs = map (\(off, body) -> toIRFunction off $ Map.elems body) $ Map.assocs funcs
 
