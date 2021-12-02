@@ -3,7 +3,6 @@ module LLVM (
   toIRNes
 ) where
 
-import AddressSpace(AddressSpace, nmiAddress, resetAddress)
 import qualified Assembly as I
 import Control.Monad (forM_, void)
 import Data.ByteString (ByteString)
@@ -21,6 +20,9 @@ import qualified LLVM.AST.IntegerPredicate as P
 import qualified LLVM.AST.Linkage as L
 import LLVM.AST.Type (i1, i8, i16, i64, ptr)
 import LLVM.IRBuilder
+import LLVM.Types (readCallbackType, writeCallbackType)
+import qualified Mapper
+import Mapper(Mapper)
 import PyF (fmt)
 
 instFunctionType :: Type
@@ -29,73 +31,6 @@ instFunctionType = FunctionType {
   argumentTypes = [ptr readCallbackType, ptr writeCallbackType],
   isVarArg = False
 }
-
-readCallbackType :: Type
-readCallbackType = FunctionType {
-  resultType = i8,
-  argumentTypes = [i16],
-  isVarArg = False
-}
-
-writeCallbackType :: Type
-writeCallbackType = FunctionType {
-  resultType = VoidType,
-  argumentTypes = [i16, i8],
-  isVarArg = False
-}
-
-memDef :: Definition
-memDef = GlobalDefinition globalVariableDefaults {
-  G.name = "mem",
-  G.type' = ArrayType 32768 i8,
-  G.linkage = L.Private,
-  G.initializer = Just $ C.Null $ ArrayType 32768 i8
-}
-
-mem :: Operand
-mem = ConstantOperand $ C.GlobalReference (ptr $ ArrayType 32768 i8) "mem"
-
-getMemValue :: Operand -> IRBuilder Operand
-getMemValue addr = do
-  addr' <- emitInstr (ptr i8) $ GetElementPtr True mem [ConstantOperand $ C.Int 32 0, addr] []
-  load addr' 0
-
-setMemValue :: Operand -> Operand -> IRBuilder ()
-setMemValue addr val = do
-  addr' <- emitInstr (ptr i8) $ GetElementPtr True mem [ConstantOperand $ C.Int 32 0, addr] []
-  store addr' 0 val
-
-prgRomDef :: ByteString -> Definition
-prgRomDef rom = GlobalDefinition globalVariableDefaults {
-  G.name = "prgRom",
-  G.type' = ArrayType 32768 i8,
-  G.linkage = L.Private,
-  G.isConstant = True,
-  G.initializer = Just $ C.Array {
-    C.memberType = i8,
-    C.memberValues = map (C.Int 8 . fromIntegral) $ BS.unpack rom
-  }
-}
-
-prgRom :: Operand
-prgRom = ConstantOperand $ C.GlobalReference (ptr $ ArrayType 32768 i8) "prgRom"
-
-chrRomDef :: ByteString -> Definition
-chrRomDef rom = GlobalDefinition globalVariableDefaults {
-  G.name = "chrRom",
-  G.type' = ArrayType 8192 i8,
-  G.linkage = L.Private,
-  G.isConstant = True,
-  G.initializer = Just $ C.Array {
-    C.memberType = i8,
-    C.memberValues = map (C.Int 8 . fromIntegral) $ BS.unpack rom
-  }
-}
-
-getRomValue :: Operand -> IRBuilder Operand
-getRomValue addr = do
-  addr' <- emitInstr (ptr i8) $ GetElementPtr True prgRom [ConstantOperand $ C.Int 32 0, addr] []
-  load addr' 0
 
 regRef :: Type -> Name -> Operand
 regRef type' = LocalReference (ptr type')
@@ -148,8 +83,8 @@ addCarry arg1 arg2 = do
     isVarArg = False
   } "llvm.uadd.with.overflow.i8"
 
-nesReadMemDef :: Definition
-nesReadMemDef = GlobalDefinition $ functionDefaults {
+readMemDef :: Mapper -> Definition
+readMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "readMem",
   G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [], Parameter i16 "addr" []], False),
   G.returnType = i8,
@@ -158,39 +93,7 @@ nesReadMemDef = GlobalDefinition $ functionDefaults {
   }
   where readCallback = LocalReference (ptr readCallbackType) "readCallback"
         addr = LocalReference i16 "addr"
-        body = execIRBuilder emptyIRBuilder $ mdo
-          _entry <- block `named` "entry"
-          condLow <- icmp P.ULT addr $ literalAddr 0x2000
-          condBr condLow ifLow elseLow
-          ifLow <- block `named` "ifLow"
-          ifLowLoc <- urem addr $ literalAddr 0x800
-          ifLowVal <- getMemValue ifLowLoc
-          ret ifLowVal
-          elseLow <- block `named` "elseLow"
-          condPpu <- icmp P.ULT addr $ literalAddr 0x4000
-          condBr condPpu ifPpu elsePpu
-          ifPpu <- block `named` "ifPpu"
-          ppuLocTemp <- sub addr $ literalAddr 0x2000
-          ppuLocTemp2 <- urem ppuLocTemp $ literalAddr 0x100
-          ppuLoc <- add ppuLocTemp2 $ literalAddr 0x2000
-          ppuVal <- doReadCallback ppuLoc
-          ret ppuVal
-          elsePpu <- block `named` "elsePpu"
-          condApu <- icmp P.ULT addr $ literalAddr 0x4020
-          condBr condApu ifApu elseApu
-          ifApu <- block `named` "ifApu"
-          apuVal <- doReadCallback addr
-          ret apuVal
-          elseApu <- block `named` "elseApu"
-          condRam <- icmp P.ULT addr $ literalAddr 0x8000
-          condBr condRam ifRam end
-          ifRam <- block `named` "ifRam"
-          memVal <- getMemValue addr
-          ret memVal
-          end <- block `named` "end"
-          romAddr <- sub addr $ literalAddr 0x8000
-          romVal <- getRomValue romAddr
-          ret romVal
+        body = execIRBuilder emptyIRBuilder $ Mapper.readBody mapper addr doReadCallback
         doReadCallback addr = do
           emitInstr i8 $ Call {
             tailCallKind = Nothing,
@@ -210,8 +113,8 @@ readMem addr = call func [(LocalReference (ptr readCallbackType) "readCallback",
     isVarArg = False
   } "readMem"
 
-nesWriteMemDef :: Definition
-nesWriteMemDef = GlobalDefinition $ functionDefaults {
+writeMemDef :: Mapper -> Definition
+writeMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "writeMem",
   G.parameters = ([Parameter (ptr writeCallbackType) "writeCallback" [], Parameter i16 "addr" [],
                    Parameter i8 "val" []], False),
@@ -222,38 +125,8 @@ nesWriteMemDef = GlobalDefinition $ functionDefaults {
   where writeCallback = LocalReference (ptr writeCallbackType) "writeCallback"
         addr = LocalReference i16 "addr"
         val = LocalReference i8 "val"
-        body = execIRBuilder emptyIRBuilder $ mdo
-          _entry <- block `named` "entry"
-          condLow <- icmp P.ULT addr $ literalAddr 0x2000
-          condBr condLow ifLow elseLow
-          ifLow <- block `named` "ifLow"
-          ifLowLoc <- urem addr $ literalAddr 0x800
-          setMemValue ifLowLoc val
-          retVoid
-          elseLow <- block `named` "elseLow"
-          condPpu <- icmp P.ULT addr $ literalAddr 0x4000
-          condBr condPpu ifPpu elsePpu
-          ifPpu <- block `named` "ifPpu"
-          ppuLocTemp <- sub addr $ literalAddr 0x2000
-          ppuLocTemp2 <- urem ppuLocTemp $ literalAddr 0x100
-          ppuLoc <- add ppuLocTemp2 $ literalAddr 0x2000
-          doWriteCallback ppuLoc
-          retVoid
-          elsePpu <- block `named` "elsePpu"
-          condApu <- icmp P.ULT addr $ literalAddr 0x4020
-          condBr condApu ifApu elseApu
-          ifApu <- block `named` "ifApu"
-          doWriteCallback addr
-          retVoid
-          elseApu <- block `named` "elseApu"
-          condRam <- icmp P.ULT addr $ literalAddr 0x8000
-          condBr condRam ifRam end
-          ifRam <- block `named` "ifRam"
-          setMemValue addr val
-          retVoid
-          end <- block `named` "end"
-          retVoid
-        doWriteCallback addr = do
+        body = execIRBuilder emptyIRBuilder $ Mapper.writeBody mapper addr val doWriteCallback
+        doWriteCallback addr val = do
           emitInstrVoid $ Call {
             tailCallKind = Nothing,
             callingConvention = CC.C,
@@ -272,7 +145,7 @@ writeMem addr val = void $ call func [(LocalReference (ptr writeCallbackType) "w
     isVarArg = False
   } "writeMem"
 
-resetDef :: AddressSpace -> Definition
+resetDef :: Mapper -> Definition
 resetDef mem = GlobalDefinition $ functionDefaults {
   G.name = "reset",
   G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
@@ -291,11 +164,11 @@ resetDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
-          call (functionAtAddr $ resetAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
+          call (functionAtAddr $ Mapper.resetAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, [])]
           retVoid
 
-nmiDef :: AddressSpace -> Definition
+nmiDef :: Mapper -> Definition
 nmiDef mem = GlobalDefinition $ functionDefaults {
   G.name = "nmi",
   G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
@@ -314,20 +187,17 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
-          call (functionAtAddr $ nmiAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
+          call (functionAtAddr $ Mapper.nmiAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, [])]
           retVoid
 
-nesModuleDefs :: [Definition]
-nesModuleDefs = [nesReadMemDef, nesWriteMemDef]
-
 moduleDefs :: [Definition]
-moduleDefs = [memDef, addCarryDef]
+moduleDefs = [addCarryDef]
 
-toIRNes :: Map Word16 (Map Word16 I.Instruction) -> ByteString -> ByteString -> AddressSpace -> Module
-toIRNes funcs rom chrRom mem = defaultModule {
+toIRNes :: Map Word16 (Map Word16 I.Instruction) -> Mapper -> Module
+toIRNes funcs mapper = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ nesModuleDefs ++ [resetDef mem, nmiDef mem, prgRomDef rom, chrRomDef chrRom] ++ irFuncs
+  moduleDefinitions = moduleDefs ++ Mapper.globals mapper ++ [readMemDef mapper, writeMemDef mapper, resetDef mapper, nmiDef mapper] ++ irFuncs
   }
   where irFuncs = map (\(off, body) -> toIRFunction off $ Map.elems body) $ Map.assocs funcs
 

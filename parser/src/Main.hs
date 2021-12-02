@@ -2,9 +2,10 @@
 
 module Main where
 
-import AddressSpace (
-  AddressSpace(AddressSpace, readStatic),
+import Mapper (
+  Mapper,
   irqAddress,
+  mapper0,
   nmiAddress,
   readRom,
   resetAddress
@@ -49,7 +50,7 @@ disassemble :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
 disassemble _ _ [input, output] = do
   buf <- BS.readFile input
   let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  let mem = mapper0 $ prgRom file
+  let mem = mapper0 (prgRom file) $ error "No chr rom"
   withFile output WriteMode $ \h -> do
     let reset = resetAddress mem
     hPutStrLn h [fmt|; Reset: {reset:04x}|]
@@ -69,18 +70,14 @@ llvm :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
 llvm _ _ [input, output] = do
   buf <- BS.readFile input
   let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  let mem = mapper0 $ prgRom file
+  let mem = mapper0 (prgRom file) $ chrRom file
   withFile output WriteMode $ \h -> do
     let reset = resetAddress mem
     let nmi = nmiAddress mem
     let irq = irqAddress mem
     let parser = selfLoopPass $ smbSwitchPass passBase
     let functions = functionBodies parser [reset, nmi, irq] mem
-    TIO.hPutStrLn h $ ppllvm $ toIRNes functions (prgRom file) (chrRom file) mem
-
-mapper0 :: BS.ByteString -> AddressSpace
-mapper0 rom = AddressSpace { readStatic = readStatic }
-  where readStatic = fromJust . readRom 32768 rom
+    TIO.hPutStrLn h $ ppllvm $ toIRNes functions mem
 
 main :: IO ()
 main = do

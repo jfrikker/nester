@@ -10,13 +10,12 @@ module Assembly (
   nextAddr,
   followingAddrs,
   offset,
-  readAddress,
   readInstruction,
   readInstructions,
   toAssembly
 ) where
 
-import AddressSpace (AddressSpace, readAddress, readValue)
+import Mapper (Mapper, readStaticAddress, readStaticValue)
 import Control.Monad.Extra (iterateM)
 import Data.Int(Int8)
 import Data.Foldable (foldrM)
@@ -164,8 +163,8 @@ callTarget :: Instruction -> Maybe Word16
 callTarget (Absolute _ JSR arg) = Just arg
 callTarget _ = Nothing
 
-readInstruction :: Word16 -> AddressSpace -> Instruction
-readInstruction offset = readValue offset >>= ri_
+readInstruction :: Word16 -> Mapper -> Instruction
+readInstruction offset = readStaticValue offset >>= ri_
   where ri_ 0x00 = readImplied BRK
         ri_ 0x01 = readIndirectX ORA
         ri_ 0x05 = readZeropage ORA
@@ -318,19 +317,19 @@ readInstruction offset = readValue offset >>= ri_
         ri_ 0xfd = readAbsoluteX SBC
         ri_ 0xfe = readAbsoluteX INC
         ri_ x = return $ Unknown offset x
-        readAbsolute opcode = Absolute offset opcode <$> readAddress nextOffset
-        readAbsoluteX opcode = AbsoluteX offset opcode <$> readAddress nextOffset
-        readAbsoluteY opcode = AbsoluteY offset opcode <$> readAddress nextOffset
+        readAbsolute opcode = Absolute offset opcode <$> readStaticAddress nextOffset
+        readAbsoluteX opcode = AbsoluteX offset opcode <$> readStaticAddress nextOffset
+        readAbsoluteY opcode = AbsoluteY offset opcode <$> readStaticAddress nextOffset
         readAccumulator opcode = return $ Accumulator offset opcode
-        readImmediate opcode = Immediate offset opcode <$> readValue nextOffset
+        readImmediate opcode = Immediate offset opcode <$> readStaticValue nextOffset
         readImplied opcode = return $ Implied offset opcode
-        readIndirect opcode = Indirect offset opcode <$> readAddress nextOffset
-        readIndirectX opcode = IndirectX offset opcode <$> readValue nextOffset
-        readIndirectY opcode = IndirectY offset opcode <$> readValue nextOffset
-        readRelative opcode = Relative offset opcode . fromIntegral <$> readValue nextOffset
-        readZeropage opcode = Zeropage offset opcode <$> readValue nextOffset
-        readZeropageX opcode = ZeropageX offset opcode <$> readValue nextOffset
-        readZeropageY opcode = ZeropageY offset opcode <$> readValue nextOffset
+        readIndirect opcode = Indirect offset opcode <$> readStaticAddress nextOffset
+        readIndirectX opcode = IndirectX offset opcode <$> readStaticValue nextOffset
+        readIndirectY opcode = IndirectY offset opcode <$> readStaticValue nextOffset
+        readRelative opcode = Relative offset opcode . fromIntegral <$> readStaticValue nextOffset
+        readZeropage opcode = Zeropage offset opcode <$> readStaticValue nextOffset
+        readZeropageX opcode = ZeropageX offset opcode <$> readStaticValue nextOffset
+        readZeropageY opcode = ZeropageY offset opcode <$> readStaticValue nextOffset
         nextOffset = offset + 1
 
 toAssembly :: Instruction -> String
@@ -353,7 +352,7 @@ toAssembly (ZeropageY off op arg) = [fmt|{off:04x}: {op} ${arg:02x},Y|]
 toAssembly (Switch off op _ addrs) = [fmt|{off:04x}: {op} [{showAddrs}]|]
   where showAddrs = intercalate ", " $ map (\a -> [fmt|{a:04x}|]) addrs
 
-readInstructions :: Word16 -> AddressSpace -> [Instruction]
+readInstructions :: Word16 -> Mapper -> [Instruction]
 readInstructions off = do
   inst <- readInstruction off
   rest <- iterateM (readInstruction . nextAddr) inst
@@ -362,7 +361,7 @@ readInstructions off = do
 callTargets :: [Instruction] -> [Word16]
 callTargets = mapMaybe callTarget
 
-functionBodies :: [Word16] -> AddressSpace -> Map Word16 (Map Word16 Instruction)
+functionBodies :: [Word16] -> Mapper -> Map Word16 (Map Word16 Instruction)
 functionBodies = functionBodiesWithParserM readInstruction
 
 functionBodiesWithParser :: (Word16 -> Instruction) -> [Word16] -> Map Word16 (Map Word16 Instruction)
@@ -374,7 +373,7 @@ functionBodiesWithParserM p = reachableM functionBodiesWithParser_
           body <- functionBodyWithParserM p off
           return (body, callTargets $ Map.elems body)
 
-functionBody :: Word16 -> AddressSpace -> Map Word16 Instruction
+functionBody :: Word16 -> Mapper -> Map Word16 Instruction
 functionBody = functionBodyWithParserM readInstruction
 
 functionBodyWithParser :: (Word16 -> Instruction) -> Word16 -> Map Word16 Instruction

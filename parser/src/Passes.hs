@@ -5,7 +5,7 @@ module Passes (
   smbSwitchPass
 ) where
 
-import AddressSpace (AddressSpace)
+import Mapper (Mapper, readStaticAddress)
 import qualified Assembly as I
 import Data.Functor ((<&>))
 import Data.Map (Map, (!))
@@ -14,12 +14,12 @@ import Data.Word (Word16)
 
 data Parser = Parser {
   postProcess :: [Word16] -> Map Word16 (Map Word16 I.Instruction) -> Map Word16 (Map Word16 I.Instruction),
-  readInstruction :: Word16 -> AddressSpace -> I.Instruction
+  readInstruction :: Word16 -> Mapper -> I.Instruction
 }
 
 type Pass = Parser -> Parser
 
-functionBodies :: Parser -> [Word16] -> AddressSpace -> Map Word16 (Map Word16 I.Instruction)
+functionBodies :: Parser -> [Word16] -> Mapper -> Map Word16 (Map Word16 I.Instruction)
 functionBodies p offs addr = postProcess p offs funcs
   where funcs = I.functionBodiesWithParser (\off -> readInstruction p off addr) offs
 
@@ -49,7 +49,7 @@ smbSwitchPass underlying = Parser {
           inst <- readInstruction underlying off
           case inst of
             (I.Absolute _ I.JSR 0x8e04) -> do
-              addrs <- mapM I.readAddress [off + 3, (off + 5)..] <&> takeWhile (>= 0x8000)
+              addrs <- mapM readStaticAddress [off + 3, (off + 5)..] <&> takeWhile (>= 0x8000)
               return $ I.Switch off I.SWA 3 addrs
             i -> return i
         postProcess_ offs funcs = postProcess underlying offs $ I.functionBodiesWithParser parse offs
