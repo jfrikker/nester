@@ -123,32 +123,6 @@ regC = regRef i1 "regC"
 
 regS :: Operand
 regS = regRef i8 "regS"
-
-subCarryDef :: Definition
-subCarryDef = GlobalDefinition functionDefaults {
-  G.name = "llvm.usub.with.overflow.i8",
-  G.returnType = StructureType {
-    isPacked = False,
-    elementTypes = [i8, i1]
-  },
-  G.parameters = ([Parameter i8 "a" [], Parameter i8 "b" []], False)
-}
-
-subCarry :: Operand -> Operand -> IRBuilder (Operand, Operand)
-subCarry arg1 arg2 = do
-  resPacked <- call func [(arg1, []), (arg2, [])]
-  res <- extractValue resPacked [0]
-  carry <- extractValue resPacked [1]
-  return (res, carry)
-  where func = ConstantOperand $ C.GlobalReference FunctionType {
-    resultType = StructureType {
-      isPacked = False,
-      elementTypes = [i8, i1]
-    },
-    argumentTypes = [i8, i8],
-    isVarArg = False
-  } "llvm.usub.with.overflow.i8"
-
 addCarryDef :: Definition
 addCarryDef = GlobalDefinition functionDefaults {
   G.name = "llvm.uadd.with.overflow.i8",
@@ -348,7 +322,7 @@ nesModuleDefs :: [Definition]
 nesModuleDefs = [nesReadMemDef, nesWriteMemDef]
 
 moduleDefs :: [Definition]
-moduleDefs = [memDef, subCarryDef, addCarryDef]
+moduleDefs = [memDef, addCarryDef]
 
 toIRNes :: Map Word16 (Map Word16 I.Instruction) -> ByteString -> ByteString -> AddressSpace -> Module
 toIRNes funcs rom chrRom mem = defaultModule {
@@ -683,8 +657,9 @@ _bit val = do
   setZ res
 _compare reg arg = do
   s <- load reg 0
-  (res, carry) <- subCarry s arg
+  res <- sub s arg
   setNZ res
+  carry <- icmp P.UGE s arg
   store regC 0 carry
 _decrement val = do
   newVal <- sub val $ literal 1
