@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, QuasiQuotes, RecursiveDo #-}
+{-# LANGUAGE BlockArguments, OverloadedStrings, QuasiQuotes, RecursiveDo #-}
 module Mapper (
   Mapper(..),
   irqAddress,
@@ -14,8 +14,8 @@ import Data.Bits (shiftL)
 import qualified Data.ByteString as BS
 import Data.Functor ((<&>))
 import Data.Maybe (fromJust)
-import Data.Word (Word16, Word8)
-import LLVM.AST (Definition(GlobalDefinition))
+import Data.Word (Word64, Word16, Word8)
+import LLVM.AST (Definition(GlobalDefinition), Name)
 import qualified LLVM.AST.CallingConvention as CallingConvention
 import qualified LLVM.AST.Constant as Constant
 import qualified LLVM.AST.FunctionAttribute as FunctionAttribute
@@ -29,12 +29,14 @@ import qualified LLVM.AST.Type as Type
 import LLVM.AST.Operand (Operand)
 import LLVM.IRBuilder
 import LLVM.Types (readCallbackType, writeCallbackType)
+import Text.ParserCombinators.ReadP (endBy)
 
 data Mapper = Mapper {
   readStatic :: Word16 -> Word8,
   globals :: [Definition],
   readBody :: Operand -> (Operand -> IRBuilder Operand) -> IRBuilder (),
-  writeBody :: Operand -> Operand -> (Operand -> Operand -> IRBuilder ()) -> IRBuilder ()
+  writeBody :: Operand -> Operand -> (Operand -> Operand -> IRBuilder ()) -> IRBuilder (),
+  mapperId :: Word8
 }
 
 readRom :: Word16 -> BS.ByteString -> Word16 -> Maybe Word8
@@ -64,55 +66,59 @@ nmiAddress = readStaticAddress 0xfffa
 literalAddr :: Word16 -> Operand
 literalAddr = Operand.ConstantOperand . Constant.Int 16 . fromIntegral
 
+buildMem :: Word64 -> Name -> (Definition, Operand -> IRBuilder Operand, Operand -> Operand -> IRBuilder ())
+buildMem size name = (def, read, write)
+  where def = GlobalDefinition Global.globalVariableDefaults {
+          Global.name = name,
+          Global.type' = ArrayType size i8,
+          Global.linkage = Linkage.Private,
+          Global.initializer = Just $ Constant.Null $ ArrayType size i8
+        }
+        mem = Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType size i8) name
+        read addr = do
+          addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
+          load addr' 0
+        write  addr val = do
+          addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
+          store addr' 0 val
+
+buildRom :: Word64 -> Name -> BS.ByteString -> (Definition, Operand -> IRBuilder Operand)
+buildRom size name contents = (def, read)
+  where def = GlobalDefinition Global.globalVariableDefaults {
+          Global.name = name,
+          Global.type' = ArrayType size i8,
+          Global.linkage = Linkage.Private,
+          Global.isConstant = True,
+          Global.initializer = Just $ Constant.Array {
+            Constant.memberType = i8,
+            Constant.memberValues = map (Constant.Int 8 . fromIntegral) $ BS.unpack contents
+          }
+        }
+        rom = Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType size i8) name
+        read addr = do
+          addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True rom [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
+          load addr' 0
+
 mapper0 :: BS.ByteString -> BS.ByteString -> Mapper
 mapper0 prgRom chrRom = Mapper {
     readStatic = readStatic,
     globals = globals,
     readBody = readBody,
-    writeBody = writeBody
+    writeBody = writeBody,
+    mapperId = 0
   }
   where readStatic = fromJust . readRom 32768 prgRom
-        prgRomDef = GlobalDefinition Global.globalVariableDefaults {
-          Global.name = "prgRom",
-          Global.type' = ArrayType 32768 i8,
-          Global.linkage = Linkage.Private,
-          Global.isConstant = True,
-          Global.initializer = Just $ Constant.Array {
-            Constant.memberType = i8,
-            Constant.memberValues = map (Constant.Int 8 . fromIntegral) $ BS.unpack prgRom
-          }
-        }
-        chrRomDef = GlobalDefinition Global.globalVariableDefaults {
-          Global.name = "chrRom",
-          Global.type' = ArrayType 8192 i8,
-          Global.linkage = Linkage.Private,
-          Global.isConstant = True,
-          Global.initializer = Just $ Constant.Array {
-            Constant.memberType = i8,
-            Constant.memberValues = map (Constant.Int 8 . fromIntegral) $ BS.unpack chrRom
-          }
-        }
-        memDef = GlobalDefinition Global.globalVariableDefaults {
-          Global.name = "mem",
-          Global.type' = ArrayType 32768 i8,
-          Global.linkage = Linkage.Private,
-          Global.initializer = Just $ Constant.Null $ ArrayType 32768 i8
-        }
-        mem = Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType 32768 i8) "mem"
-        prgRomRef = Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType 32768 i8) "prgRom"
-        getMemValue addr = do
-          addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
-          load addr' 0
-        getRomValue addr = do
-          addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True prgRomRef [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
-          load addr' 0
+        (lowMemDef, readLowMem, writeLowMem) = buildMem 0x800 "lowMem"
+        (cartMemDef, readCartMem, writeCartMem) = buildMem 0x2000 "cartMem"
+        (prgRomDef, readPrgRom) = buildRom 0x8000 "prgRom" prgRom
+        (chrRomDef, _) = buildRom 8192 "chrRom" chrRom
         readBody addr readCallback = mdo
           _entry <- block `named` "entry"
           condLow <- icmp IntegerPredicate.ULT addr $ literalAddr 0x2000
           condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
-          ifLowVal <- getMemValue ifLowLoc
+          ifLowVal <- readLowMem ifLowLoc
           ret ifLowVal
           elseLow <- block `named` "elseLow"
           condPpu <- icmp IntegerPredicate.ULT addr $ literalAddr 0x4000
@@ -133,22 +139,19 @@ mapper0 prgRom chrRom = Mapper {
           condRam <- icmp IntegerPredicate.ULT addr $ literalAddr 0x8000
           condBr condRam ifRam end
           ifRam <- block `named` "ifRam"
-          memVal <- getMemValue addr
+          memVal <- readCartMem addr
           ret memVal
           end <- block `named` "end"
           romAddr <- sub addr $ literalAddr 0x8000
-          romVal <- getRomValue romAddr
+          romVal <- readPrgRom romAddr
           ret romVal
-        setMemValue addr val = do
-          addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
-          store addr' 0 val
         writeBody addr val writeCallback = mdo
           _entry <- block `named` "entry"
           condLow <- icmp IntegerPredicate.ULT addr $ literalAddr 0x2000
           condBr condLow ifLow elseLow
           ifLow <- block `named` "ifLow"
           ifLowLoc <- urem addr $ literalAddr 0x800
-          setMemValue ifLowLoc val
+          writeLowMem ifLowLoc val
           retVoid
           elseLow <- block `named` "elseLow"
           condPpu <- icmp IntegerPredicate.ULT addr $ literalAddr 0x4000
@@ -169,8 +172,14 @@ mapper0 prgRom chrRom = Mapper {
           condRam <- icmp IntegerPredicate.ULT addr $ literalAddr 0x8000
           condBr condRam ifRam end
           ifRam <- block `named` "ifRam"
-          setMemValue addr val
+          writeCartMem addr val
           retVoid
           end <- block `named` "end"
           retVoid
-        globals = [prgRomDef, chrRomDef, memDef]
+        getChrRom = GlobalDefinition $ Global.functionDefaults {
+            Global.name = "mapperId",
+            Global.parameters = ([], False),
+            Global.returnType = Type.ArrayType 0x2000 i8,
+            Global.basicBlocks = execIRBuilder emptyIRBuilder $ ret (Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType 0x2000 i8) "chrRom")
+          }
+        globals = [prgRomDef, chrRomDef, lowMemDef, cartMemDef, getChrRom]

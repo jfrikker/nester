@@ -6,8 +6,11 @@ module NesterRuntime (
 import Control.Monad.State (liftIO)
 import qualified Control.Monad.State as State
 import Data.Word(Word8, Word16)
+import qualified Graphics.UI.GLUT as GLUT
+import Graphics.UI.GLUT (($=))
 import NesterRuntime.CPU (RomM, nmi, reset)
 import PyF (fmt)
+import qualified Graphics.UI.GLUT as GLUT
 
 readCallback :: Word16 -> RomM () Word8
 readCallback addr = do
@@ -23,4 +26,8 @@ runIt = do
   nmi readCallback writeCallback
 
 run :: IO ()
-run = State.evalStateT (reset readCallback writeCallback) ()
+run = do
+  GLUT.getArgsAndInitialize
+  GLUT.createWindow "Hello World"
+  GLUT.windowSize $= GLUT.Size 320 200
+  State.evalStateT (reset readCallback writeCallback) ()

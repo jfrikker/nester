@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 04d85736e79c4565e0bc170e7c70222beb392803a17819e4ca935c23dc48fd75
+-- hash: 20ceb593ef8b08980f337c18101e0b5c9557b231f88f87287d721e566ab5d48a
 
 name:           nester-runtime
 version:        0.1.0.0
@@ -25,12 +25,15 @@ library
   exposed-modules:
       NesterRuntime
       NesterRuntime.CPU
+      NesterRuntime.PPU
   other-modules:
       Paths_nester_runtime
   hs-source-dirs:
       src
   build-depends:
-      PyF
+      GLUT
+    , PyF
+    , array
     , base >=4.7 && <5
     , mtl
   default-language: Haskell2010

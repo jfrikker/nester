@@ -9,10 +9,8 @@ module NesterRuntime.CPU (
 import Control.Monad.State (StateT, liftIO)
 import qualified Control.Monad.State as State
 import Data.IORef (newIORef, writeIORef, readIORef, IORef)
-import Data.Word(Word8, Word16)
-import Foreign (
-  FunPtr
-  )
+import Data.Word (Word8, Word16)
+import Foreign (FunPtr)
 
 foreign import ccall "reset" romReset :: FunPtr (Word16 -> IO Word8) -> FunPtr (Word16 -> Word8 -> IO ()) -> IO ()
 foreign import ccall "nmi" romNmi :: FunPtr (Word16 -> IO Word8) -> FunPtr (Word16 -> Word8 -> IO ()) -> IO ()

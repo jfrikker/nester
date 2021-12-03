@@ -145,6 +145,15 @@ writeMem addr val = void $ call func [(LocalReference (ptr writeCallbackType) "w
     isVarArg = False
   } "writeMem"
 
+mapperIdDef :: Mapper -> Definition
+mapperIdDef mapper = GlobalDefinition $ functionDefaults {
+  G.name = "mapperId",
+  G.parameters = ([], False),
+  G.returnType = i8,
+  G.basicBlocks = body
+  }
+  where body = execIRBuilder emptyIRBuilder $ ret (literal $ Mapper.mapperId mapper)
+
 resetDef :: Mapper -> Definition
 resetDef mem = GlobalDefinition $ functionDefaults {
   G.name = "reset",
