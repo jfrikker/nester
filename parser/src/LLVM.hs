@@ -347,31 +347,114 @@ toIR_ inst@(I.Absolute _ I.STY arg) = do
   brNext inst
 toIR_ inst@(I.AbsoluteX _ I.ADC arg) = do
   absoluteXValue arg >>= _adc
+  incrClk 4
   incrClkPageBoundaryReg arg regX
   brNext inst
-toIR_ inst@(I.AbsoluteX _ I.AND arg) = absoluteXValue arg >>= _and >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.ASL arg) = absoluteXAddr arg >>= _asl >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.DEC arg) = absoluteXAddr arg >>= modifyMem _decrement >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.EOR arg) = absoluteXAddr arg >>= _eor >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.INC arg) = absoluteXAddr arg >>= modifyMem _increment >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.LDA arg) = absoluteXValue arg >>= _load regA >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.LDY arg) = absoluteXValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.LSR arg) = absoluteXAddr arg >>= modifyMem _lsr >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.ORA arg) = absoluteXValue arg >>= _ora >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.AND arg) = do
+  absoluteXValue arg >>= _and
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.ASL arg) = do
+  absoluteXAddr arg >>= _asl
+  incrClk 7
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.CMP arg) = do
+  absoluteXAddr arg >>= _compare regA
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.DEC arg) = do
+  absoluteXAddr arg >>= modifyMem _decrement
+  incrClk 7
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.EOR arg) = do
+  absoluteXAddr arg >>= _eor
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.INC arg) = do
+  absoluteXAddr arg >>= modifyMem _increment
+  incrClk 7
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.LDA arg) = do
+  absoluteXValue arg >>= _load regA
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.LDY arg) = do
+  absoluteXValue arg >>= _load regY
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.LSR arg) = do
+  absoluteXAddr arg >>= modifyMem _lsr
+  incrClk 7
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.ORA arg) = do
+  absoluteXValue arg >>= _ora
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.ROL arg) = do
+  addr <- absoluteXAddr arg
+  val <- readMem addr
+  newVal <- _rol val
+  writeMem addr newVal
+  incrClk 7
+  brNext inst
 toIR_ inst@(I.AbsoluteX _ I.ROR arg) = do
   addr <- absoluteXAddr arg
   val <- readMem addr
   newVal <- _ror val
   writeMem addr newVal
+  incrClk 7
   brNext inst
-toIR_ inst@(I.AbsoluteX _ I.STA arg) = absoluteXAddr arg >>= _store regA >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.ADC arg) = absoluteYValue arg >>= _adc >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.AND arg) = absoluteYValue arg >>= _and >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.EOR arg) = absoluteYValue arg >>= _eor >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.LDA arg) = absoluteYValue arg >>= _load regA >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.LDX arg) = absoluteYValue arg >>= _load regX >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.ORA arg) = absoluteYValue arg >>= _ora >> brNext inst
-toIR_ inst@(I.AbsoluteY _ I.STA arg) = absoluteYAddr arg >>= _store regA >> brNext inst
+toIR_ inst@(I.AbsoluteX _ I.SBC arg) = brNext inst -- TODO
+toIR_ inst@(I.AbsoluteX _ I.STA arg) = do
+  absoluteXAddr arg >>= _store regA
+  incrClk 5
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.ADC arg) = do
+  absoluteYValue arg >>= _adc
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.AND arg) = do
+  absoluteYValue arg >>= _and
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.CMP arg) = do
+  absoluteYValue arg >>= _compare regA
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.EOR arg) = do
+  absoluteYValue arg >>= _eor
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.LDA arg) = do
+  absoluteYValue arg >>= _load regA
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.LDX arg) = do
+  absoluteYValue arg >>= _load regX
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.ORA arg) = do
+  absoluteYValue arg >>= _ora
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
+toIR_ inst@(I.AbsoluteY _ I.SBC arg) = brNext inst -- TODO
+toIR_ inst@(I.AbsoluteY _ I.STA arg) = do
+  absoluteYAddr arg >>= _store regA
+  incrClk 5
+  brNext inst
 toIR_ inst@(I.Accumulator _ I.ASL) = withAccumulator _asl >> brNext inst
 toIR_ inst@(I.Accumulator _ I.LSR) = withAccumulator _lsr >> brNext inst
 toIR_ inst@(I.Accumulator _ I.ROL) = withAccumulator _rol >> brNext inst
