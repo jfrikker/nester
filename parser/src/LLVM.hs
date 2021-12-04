@@ -360,7 +360,7 @@ toIR_ inst@(I.AbsoluteX _ I.ASL arg) = do
   incrClk 7
   brNext inst
 toIR_ inst@(I.AbsoluteX _ I.CMP arg) = do
-  absoluteXAddr arg >>= _compare regA
+  absoluteXValue arg >>= _compare regA
   incrClk 4
   incrClkPageBoundaryReg arg regX
   brNext inst

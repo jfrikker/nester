@@ -11,14 +11,14 @@ import Graphics.UI.GLUT (($=))
 import NesterRuntime.CPU (RomM, nmi, reset)
 import PyF (fmt)
 
-readCallback :: Word16 -> RomM () Word8
-readCallback addr = do
-  liftIO $ putStrLn [fmt|Reading: {addr:04x}|]
+readCallback :: Word16 -> Word16 -> RomM () Word8
+readCallback addr clk = do
+  liftIO $ putStrLn [fmt|Reading: {addr:04x}    (cycles:{clk:04x})|]
   return 0xf0
 
-writeCallback :: Word16 -> Word8 -> RomM () ()
-writeCallback addr val = do
-  liftIO $ putStrLn [fmt|Writing: {addr:04x} {val:02x}|]
+writeCallback :: Word16 -> Word8 -> Word16 -> RomM () ()
+writeCallback addr val clk = do
+  liftIO $ putStrLn [fmt|Writing: {addr:04x} {val:02x} (cycles:{clk:04})|]
 
 runIt = do
   reset readCallback writeCallback
