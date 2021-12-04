@@ -179,7 +179,7 @@ mapper0 prgRom chrRom = Mapper {
         getChrRom = GlobalDefinition $ Global.functionDefaults {
             Global.name = "mapperId",
             Global.parameters = ([], False),
-            Global.returnType = Type.ArrayType 0x2000 i8,
+            Global.returnType = Type.ptr $ Type.ArrayType 0x2000 i8,
             Global.basicBlocks = execIRBuilder emptyIRBuilder $ ret (Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType 0x2000 i8) "chrRom")
           }
         globals = [prgRomDef, chrRomDef, lowMemDef, cartMemDef, getChrRom]

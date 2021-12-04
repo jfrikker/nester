@@ -10,7 +10,6 @@ import qualified Graphics.UI.GLUT as GLUT
 import Graphics.UI.GLUT (($=))
 import NesterRuntime.CPU (RomM, nmi, reset)
 import PyF (fmt)
-import qualified Graphics.UI.GLUT as GLUT
 
 readCallback :: Word16 -> RomM () Word8
 readCallback addr = do

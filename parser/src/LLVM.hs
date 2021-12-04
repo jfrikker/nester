@@ -58,6 +58,10 @@ regC = regRef i1 "regC"
 
 regS :: Operand
 regS = regRef i8 "regS"
+
+regClk :: Operand
+regClk = regRef i16 "clk"
+
 addCarryDef :: Definition
 addCarryDef = GlobalDefinition functionDefaults {
   G.name = "llvm.uadd.with.overflow.i8",
@@ -86,27 +90,31 @@ addCarry arg1 arg2 = do
 readMemDef :: Mapper -> Definition
 readMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "readMem",
-  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [], Parameter i16 "addr" []], False),
+  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [], Parameter i16 "addr" [], Parameter (ptr i16) "clk" []], False),
   G.returnType = i8,
   G.linkage = L.Private,
   G.basicBlocks = body
   }
   where readCallback = LocalReference (ptr readCallbackType) "readCallback"
         addr = LocalReference i16 "addr"
+        clk = LocalReference (ptr i16) "clk"
         body = execIRBuilder emptyIRBuilder $ Mapper.readBody mapper addr doReadCallback
         doReadCallback addr = do
-          emitInstr i8 $ Call {
+          clk' <- load clk 0
+          res <- emitInstr i8 $ Call {
             tailCallKind = Nothing,
             callingConvention = CC.C,
             returnAttributes = [],
             LI.function = Right readCallback,
-            arguments = [(addr, [])],
+            arguments = [(addr, []), (clk', [])],
             functionAttributes = [Right FA.ReadNone],
             metadata = []
           }
+          store clk 0 $ literalAddr 0
+          return res
 
 readMem :: Operand -> IRBuilder Operand
-readMem addr = call func [(LocalReference (ptr readCallbackType) "readCallback", []), (addr, [])]
+readMem addr = call func [(LocalReference (ptr readCallbackType) "readCallback", []), (addr, []), (regClk, [])]
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = i8,
     argumentTypes = [ptr readCallbackType, i16],
@@ -117,7 +125,7 @@ writeMemDef :: Mapper -> Definition
 writeMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "writeMem",
   G.parameters = ([Parameter (ptr writeCallbackType) "writeCallback" [], Parameter i16 "addr" [],
-                   Parameter i8 "val" []], False),
+                   Parameter i8 "val" [], Parameter (ptr i16) "clk" []], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
   G.basicBlocks = body
@@ -125,20 +133,23 @@ writeMemDef mapper = GlobalDefinition $ functionDefaults {
   where writeCallback = LocalReference (ptr writeCallbackType) "writeCallback"
         addr = LocalReference i16 "addr"
         val = LocalReference i8 "val"
+        clk = LocalReference (ptr i16) "clk"
         body = execIRBuilder emptyIRBuilder $ Mapper.writeBody mapper addr val doWriteCallback
         doWriteCallback addr val = do
+          clk' <- load clk 0
           emitInstrVoid $ Call {
             tailCallKind = Nothing,
             callingConvention = CC.C,
             returnAttributes = [],
             LI.function = Right writeCallback,
-            arguments = [(addr, []), (val, [])],
+            arguments = [(addr, []), (val, []), (clk', [])],
             functionAttributes = [Right FA.ReadNone],
             metadata = []
           }
+          store clk 0 $ literalAddr 0
 
 writeMem :: Operand -> Operand -> IRBuilder ()
-writeMem addr val = void $ call func [(LocalReference (ptr writeCallbackType) "writeCallback", []), (addr, []), (val, [])]
+writeMem addr val = do void $ call func [(LocalReference (ptr writeCallbackType) "writeCallback", []), (addr, []), (val, []), (regClk, [])]
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = VoidType,
     argumentTypes = [ptr writeCallbackType, i16, i8],
@@ -173,8 +184,10 @@ resetDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
+          clk <- alloca i16 Nothing 0
+          store clk 0 $ literalAddr 0
           call (functionAtAddr $ Mapper.resetAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
-            (z, []), (v, []), (c, []), (s, [])]
+            (z, []), (v, []), (c, []), (s, []), (clk, [])]
           retVoid
 
 nmiDef :: Mapper -> Definition
@@ -196,8 +209,10 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
           v <- alloca i1 Nothing 0
           c <- alloca i1 Nothing 0
           s <- alloca i8 Nothing 0
+          clk <- alloca i16 Nothing 0
+          store clk 0 $ literalAddr 0
           call (functionAtAddr $ Mapper.nmiAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
-            (z, []), (v, []), (c, []), (s, [])]
+            (z, []), (v, []), (c, []), (s, []), (clk, [])]
           retVoid
 
 moduleDefs :: [Definition]
@@ -219,7 +234,7 @@ toIRFunction addr insts = GlobalDefinition $ functionDefaults {
                    Parameter (ptr i8) "regX" [], Parameter (ptr i8) "regY" [],
                    Parameter (ptr i1) "regN" [], Parameter (ptr i1) "regZ" [],
                    Parameter (ptr i1) "regV" [], Parameter (ptr i1) "regC" [],
-                   Parameter (ptr i8) "regS" []], False),
+                   Parameter (ptr i8) "regS" [], Parameter (ptr i16) "clk" []], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
   G.basicBlocks = body,
@@ -240,29 +255,100 @@ toIR inst = do
   toIR_ inst
 
 toIR_ :: I.Instruction -> IRBuilder ()
-toIR_ inst@(I.Absolute _ I.BIT arg) = absoluteValue arg >>= _bit >> brNext inst
-toIR_ inst@(I.Absolute _ I.ADC arg) = absoluteValue arg >>= _adc >> brNext inst
-toIR_ inst@(I.Absolute _ I.AND arg) = absoluteValue arg >>= _and >> brNext inst
-toIR_ inst@(I.Absolute _ I.ASL arg) = absoluteAddr arg >>= _asl >> brNext inst
-toIR_ inst@(I.Absolute _ I.DEC arg) = absoluteAddr arg >>= modifyMem _decrement >> brNext inst
-toIR_ inst@(I.Absolute _ I.EOR arg) = absoluteAddr arg >>= _eor >> brNext inst
-toIR_ inst@(I.Absolute _ I.INC arg) = absoluteAddr arg >>= modifyMem _increment >> brNext inst
+toIR_ inst@(I.Absolute _ I.ADC arg) = do
+  absoluteValue arg >>= _adc
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.AND arg) = do
+  absoluteValue arg >>= _and
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.ASL arg) = do
+  absoluteAddr arg >>= _asl
+  incrClk 6
+  brNext inst
+toIR_ inst@(I.Absolute _ I.BIT arg) = do
+  absoluteValue arg >>= _bit
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.CMP arg) = do
+  absoluteValue arg >>= _compare regA
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.CPX arg) = do
+  absoluteValue arg >>= _compare regX
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.CPY arg) = do
+  absoluteValue arg >>= _compare regY
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.DEC arg) = do
+  absoluteAddr arg >>= modifyMem _decrement
+  incrClk 6
+  brNext inst
+toIR_ inst@(I.Absolute _ I.EOR arg) = do
+  absoluteAddr arg >>= _eor
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.INC arg) = do
+  absoluteAddr arg >>= modifyMem _increment
+  incrClk 6
+  brNext inst
 toIR_ (I.Absolute _ I.JMP arg) = do
+  incrClk 3
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ inst@(I.Absolute _ I.JSR arg) = do
+  incrClk 6
   call (functionAtAddr arg) [(LocalReference (ptr readCallbackType) "readCallback", []),
     (LocalReference (ptr writeCallbackType) "writeCallback", []), (regA, []), (regX, []),
-    (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, [])]
+    (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, []), (regClk, [])]
   brNext inst
-toIR_ inst@(I.Absolute _ I.LDA arg) = absoluteValue arg >>= _load regA >> brNext inst
-toIR_ inst@(I.Absolute _ I.LDX arg) = absoluteValue arg >>= _load regX >> brNext inst
-toIR_ inst@(I.Absolute _ I.LDY arg) = absoluteValue arg >>= _load regY >> brNext inst
-toIR_ inst@(I.Absolute _ I.LSR arg) = absoluteAddr arg >>= modifyMem _lsr >> brNext inst
-toIR_ inst@(I.Absolute _ I.ORA arg) = absoluteValue arg >>= _ora >> brNext inst
-toIR_ inst@(I.Absolute _ I.STA arg) = absoluteAddr arg >>= _store regA >> brNext inst
-toIR_ inst@(I.Absolute _ I.STX arg) = absoluteAddr arg >>= _store regX >> brNext inst
-toIR_ inst@(I.Absolute _ I.STY arg) = absoluteAddr arg >>= _store regY >> brNext inst
-toIR_ inst@(I.AbsoluteX _ I.ADC arg) = absoluteXValue arg >>= _adc >> brNext inst
+toIR_ inst@(I.Absolute _ I.LDA arg) = do
+  absoluteValue arg >>= _load regA
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.LDX arg) = do
+  absoluteValue arg >>= _load regX
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.LDY arg) = do
+  absoluteValue arg >>= _load regY 
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.LSR arg) = do
+  absoluteAddr arg >>= modifyMem _lsr
+  incrClk 6
+  brNext inst
+toIR_ inst@(I.Absolute _ I.ORA arg) = do
+  absoluteValue arg >>= _ora
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.ROL arg) = do
+  absoluteValue arg >>= _rol
+  incrClk 6
+  brNext inst
+toIR_ inst@(I.Absolute _ I.ROR arg) = do
+  absoluteValue arg >>= _ror
+  incrClk 6
+  brNext inst
+toIR_ inst@(I.Absolute _ I.SBC arg) = brNext inst -- TODO
+toIR_ inst@(I.Absolute _ I.STA arg) = do
+  absoluteAddr arg >>= _store regA
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.STX arg) = do
+  absoluteAddr arg >>= _store regX
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.Absolute _ I.STY arg) = do
+  absoluteAddr arg >>= _store regY
+  incrClk 4
+  brNext inst
+toIR_ inst@(I.AbsoluteX _ I.ADC arg) = do
+  absoluteXValue arg >>= _adc
+  incrClkPageBoundaryReg arg regX
+  brNext inst
 toIR_ inst@(I.AbsoluteX _ I.AND arg) = absoluteXValue arg >>= _and >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.ASL arg) = absoluteXAddr arg >>= _asl >> brNext inst
 toIR_ inst@(I.AbsoluteX _ I.DEC arg) = absoluteXAddr arg >>= modifyMem _decrement >> brNext inst
@@ -296,12 +382,18 @@ toIR_ inst@(I.Immediate _ I.CMP arg) = immediateValue arg >>= _compare regA >> b
 toIR_ inst@(I.Immediate _ I.CPX arg) = immediateValue arg >>= _compare regX >> brNext inst
 toIR_ inst@(I.Immediate _ I.CPY arg) = immediateValue arg >>= _compare regY >> brNext inst
 toIR_ inst@(I.Immediate _ I.EOR arg) = immediateValue arg >>= _eor >> brNext inst
-toIR_ inst@(I.Immediate _ I.LDA arg) = immediateValue arg >>= _load regA >> brNext inst
+toIR_ inst@(I.Immediate _ I.LDA arg) = do
+  immediateValue arg >>= _load regA
+  incrClk 2
+  brNext inst
 toIR_ inst@(I.Immediate _ I.LDX arg) = immediateValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDY arg) = immediateValue arg >>= _load regY >> brNext inst
 toIR_ inst@(I.Immediate _ I.ORA arg) = immediateValue arg >>= _ora >> brNext inst
 toIR_ inst@(I.Implied _ I.CLC) = do
   store regC 0 $ ConstantOperand $ C.Int 1 0
+  brNext inst
+toIR_ inst@(I.Implied _ I.CLD) = do
+  incrClk 2
   brNext inst
 toIR_ inst@(I.Implied _ I.CLV) = do
   store regV 0 $ ConstantOperand $ C.Int 1 0
@@ -331,6 +423,9 @@ toIR_ (I.Implied _ I.RTI) = retVoid
 toIR_ (I.Implied _ I.RTS) = retVoid
 toIR_ inst@(I.Implied _ I.SEC) = do
   store regC 0 $ ConstantOperand $ C.Int 1 1
+  brNext inst
+toIR_ inst@(I.Implied _ I.SEI) = do
+  incrClk 2
   brNext inst
 toIR_ (I.Implied _ I.SLP) = retVoid
 toIR_ inst@(I.Implied _ I.TAX) = _transfer regA regX >> brNext inst
@@ -622,3 +717,25 @@ setZ :: Operand -> IRBuilder ()
 setZ val = do
   bit <- icmp P.EQ val $ literal 0x0
   store regZ 0 bit
+
+incrClk :: Word16 -> IRBuilder ()
+incrClk val = do
+  clk1 <- load regClk 0
+  clk2 <- add clk1 $ literalAddr val
+  store regClk 0 clk2
+
+incrClkPageBoundaryReg :: Word16 -> Operand -> IRBuilder ()
+incrClkPageBoundaryReg addr reg = do
+  regVal <- load reg 0
+  incrClkPageBoundary addr regVal
+
+incrClkPageBoundary :: Word16 -> Operand -> IRBuilder ()
+incrClkPageBoundary addr offset = do
+  pageOff <- urem (literalAddr addr) $ literalAddr 0x100
+  offExt <- zext offset i16
+  newOff <- add pageOff offExt
+  gt <- icmp P.UGE newOff $ literalAddr 0x100
+  toAdd <- select gt (literalAddr 1) $ literalAddr 0
+  clk1 <- load regClk 0
+  clk2 <- add clk1 $ toAdd
+  store regClk 0 clk2
