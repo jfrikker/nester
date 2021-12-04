@@ -1,4 +1,4 @@
-{-# LANGUAGE BlockArguments, OverloadedStrings, QuasiQuotes, RecursiveDo #-}
+{-# LANGUAGE BlockArguments, OverloadedStrings, RecursiveDo #-}
 module Mapper (
   Mapper(..),
   irqAddress,
@@ -28,7 +28,7 @@ import LLVM.AST.Type (Type(ArrayType, VoidType), i8, i16, ptr)
 import qualified LLVM.AST.Type as Type
 import LLVM.AST.Operand (Operand)
 import LLVM.IRBuilder
-import LLVM.Types (readCallbackType, writeCallbackType)
+import LLVM.Types (callbackType)
 import Text.ParserCombinators.ReadP (endBy)
 
 data Mapper = Mapper {

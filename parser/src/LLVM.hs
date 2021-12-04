@@ -20,7 +20,7 @@ import qualified LLVM.AST.IntegerPredicate as P
 import qualified LLVM.AST.Linkage as L
 import LLVM.AST.Type (i1, i8, i16, i64, ptr)
 import LLVM.IRBuilder
-import LLVM.Types (readCallbackType, writeCallbackType)
+import LLVM.Types (callbackType)
 import qualified Mapper
 import Mapper(Mapper)
 import PyF (fmt)
@@ -28,7 +28,7 @@ import PyF (fmt)
 instFunctionType :: Type
 instFunctionType = FunctionType {
   resultType = VoidType,
-  argumentTypes = [ptr readCallbackType, ptr writeCallbackType],
+  argumentTypes = [ptr callbackType],
   isVarArg = False
 }
 
@@ -90,69 +90,87 @@ addCarry arg1 arg2 = do
 readMemDef :: Mapper -> Definition
 readMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "readMem",
-  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [], Parameter i16 "addr" [], Parameter (ptr i16) "clk" []], False),
+  G.parameters = ([Parameter (ptr callbackType) "callback" [], Parameter i16 "addr" [], Parameter (ptr i16) "clk" []], False),
   G.returnType = i8,
   G.linkage = L.Private,
   G.basicBlocks = body
   }
-  where readCallback = LocalReference (ptr readCallbackType) "readCallback"
+  where callback = LocalReference (ptr callbackType) "callback"
         addr = LocalReference i16 "addr"
         clk = LocalReference (ptr i16) "clk"
         body = execIRBuilder emptyIRBuilder $ Mapper.readBody mapper addr doReadCallback
         doReadCallback addr = do
           clk' <- load clk 0
-          res <- emitInstr i8 $ Call {
+          emitInstr i8 $ Call {
             tailCallKind = Nothing,
             callingConvention = CC.C,
             returnAttributes = [],
-            LI.function = Right readCallback,
-            arguments = [(addr, []), (clk', [])],
+            LI.function = Right callback,
+            arguments = [(literal 2, []), (clk', []), (literal 0, [])],
             functionAttributes = [Right FA.ReadNone],
             metadata = []
           }
           store clk 0 $ literalAddr 0
-          return res
+          emitInstr i8 $ Call {
+            tailCallKind = Nothing,
+            callingConvention = CC.C,
+            returnAttributes = [],
+            LI.function = Right callback,
+            arguments = [(literal 0, []), (addr, []), (literal 0, [])],
+            functionAttributes = [Right FA.ReadNone],
+            metadata = []
+          }
 
 readMem :: Operand -> IRBuilder Operand
-readMem addr = call func [(LocalReference (ptr readCallbackType) "readCallback", []), (addr, []), (regClk, [])]
+readMem addr = call func [(LocalReference (ptr callbackType) "callback", []), (addr, []), (regClk, [])]
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = i8,
-    argumentTypes = [ptr readCallbackType, i16],
+    argumentTypes = [ptr callbackType, i16],
     isVarArg = False
   } "readMem"
 
 writeMemDef :: Mapper -> Definition
 writeMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "writeMem",
-  G.parameters = ([Parameter (ptr writeCallbackType) "writeCallback" [], Parameter i16 "addr" [],
+  G.parameters = ([Parameter (ptr callbackType) "callback" [], Parameter i16 "addr" [],
                    Parameter i8 "val" [], Parameter (ptr i16) "clk" []], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
   G.basicBlocks = body
   }
-  where writeCallback = LocalReference (ptr writeCallbackType) "writeCallback"
+  where callback = LocalReference (ptr callbackType) "callback"
         addr = LocalReference i16 "addr"
         val = LocalReference i8 "val"
         clk = LocalReference (ptr i16) "clk"
         body = execIRBuilder emptyIRBuilder $ Mapper.writeBody mapper addr val doWriteCallback
         doWriteCallback addr val = do
           clk' <- load clk 0
-          emitInstrVoid $ Call {
+          emitInstr i8 $ Call {
             tailCallKind = Nothing,
             callingConvention = CC.C,
             returnAttributes = [],
-            LI.function = Right writeCallback,
-            arguments = [(addr, []), (val, []), (clk', [])],
+            LI.function = Right callback,
+            arguments = [(literal 2, []), (clk', []), (literal 0, [])],
             functionAttributes = [Right FA.ReadNone],
             metadata = []
           }
           store clk 0 $ literalAddr 0
+          emitInstr i8 $ Call {
+            tailCallKind = Nothing,
+            callingConvention = CC.C,
+            returnAttributes = [],
+            LI.function = Right callback,
+            arguments = [(literal 1, []), (addr, []), (val, [])],
+            functionAttributes = [Right FA.ReadNone],
+            metadata = []
+          }
+          return ()
 
 writeMem :: Operand -> Operand -> IRBuilder ()
-writeMem addr val = do void $ call func [(LocalReference (ptr writeCallbackType) "writeCallback", []), (addr, []), (val, []), (regClk, [])]
+writeMem addr val = do void $ call func [(LocalReference (ptr callbackType) "callback", []), (addr, []), (val, []), (regClk, [])]
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = VoidType,
-    argumentTypes = [ptr writeCallbackType, i16, i8],
+    argumentTypes = [ptr callbackType, i16, i8],
     isVarArg = False
   } "writeMem"
 
@@ -168,13 +186,11 @@ mapperIdDef mapper = GlobalDefinition $ functionDefaults {
 resetDef :: Mapper -> Definition
 resetDef mem = GlobalDefinition $ functionDefaults {
   G.name = "reset",
-  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
-                   Parameter (ptr writeCallbackType) "writeCallback" []], False),
+  G.parameters = ([Parameter (ptr callbackType) "callback" []], False),
   G.returnType = VoidType,
   G.basicBlocks = body
   }
-  where rcb = LocalReference (ptr readCallbackType) "readCallback"
-        wcb = LocalReference (ptr writeCallbackType) "writeCallback"
+  where cb = LocalReference (ptr callbackType) "callback"
         body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
           x <- alloca i8 Nothing 0
@@ -186,20 +202,18 @@ resetDef mem = GlobalDefinition $ functionDefaults {
           s <- alloca i8 Nothing 0
           clk <- alloca i16 Nothing 0
           store clk 0 $ literalAddr 0
-          call (functionAtAddr $ Mapper.resetAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
+          call (functionAtAddr $ Mapper.resetAddress mem) [(cb, []), (a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, []), (clk, [])]
           retVoid
 
 nmiDef :: Mapper -> Definition
 nmiDef mem = GlobalDefinition $ functionDefaults {
   G.name = "nmi",
-  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
-                   Parameter (ptr writeCallbackType) "writeCallback" []], False),
+  G.parameters = ([Parameter (ptr callbackType) "callback" []], False),
   G.returnType = VoidType,
   G.basicBlocks = body
   }
-  where rcb = LocalReference (ptr readCallbackType) "readCallback"
-        wcb = LocalReference (ptr writeCallbackType) "writeCallback"
+  where cb = LocalReference (ptr callbackType) "callback"
         body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
           x <- alloca i8 Nothing 0
@@ -211,7 +225,7 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
           s <- alloca i8 Nothing 0
           clk <- alloca i16 Nothing 0
           store clk 0 $ literalAddr 0
-          call (functionAtAddr $ Mapper.nmiAddress mem) [(rcb, []), (wcb, []), (a, []), (x, []), (y, []), (n, []),
+          call (functionAtAddr $ Mapper.nmiAddress mem) [(cb, []), (a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, []), (clk, [])]
           retVoid
 
@@ -228,8 +242,7 @@ toIRNes funcs mapper = defaultModule {
 toIRFunction :: Word16 -> [I.Instruction] -> Definition
 toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   G.name = [fmt|func_{addr:04x}|],
-  G.parameters = ([Parameter (ptr readCallbackType) "readCallback" [],
-                   Parameter (ptr writeCallbackType) "writeCallback" [],
+  G.parameters = ([Parameter (ptr callbackType) "callback" [],
                    Parameter (ptr i8) "regA" [],
                    Parameter (ptr i8) "regX" [], Parameter (ptr i8) "regY" [],
                    Parameter (ptr i1) "regN" [], Parameter (ptr i1) "regZ" [],
@@ -300,8 +313,7 @@ toIR_ (I.Absolute _ I.JMP arg) = do
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ inst@(I.Absolute _ I.JSR arg) = do
   incrClk 6
-  call (functionAtAddr arg) [(LocalReference (ptr readCallbackType) "readCallback", []),
-    (LocalReference (ptr writeCallbackType) "writeCallback", []), (regA, []), (regX, []),
+  call (functionAtAddr arg) [(LocalReference (ptr callbackType) "callback", []), (regA, []), (regX, []),
     (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, []), (regClk, [])]
   brNext inst
 toIR_ inst@(I.Absolute _ I.LDA arg) = do
