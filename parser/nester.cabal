@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 3e0c1222ce160ffd31d74444c0645fcdd720bf1e99f96368128572f12f1c8b0e
+-- hash: 75a053e0e342b4cb2c8cb204616adbc5d1ac6ad450289dd0b7458749048fb65c
 
 name:           nester
 version:        0.1.0.0
@@ -25,11 +25,11 @@ executable nester
   main-is: Main.hs
   other-modules:
       Assembly
+      File
       Lib
       LLVM
       LLVM.Types
       Mapper
-      Nes.File
       Passes
       Paths_nester
   hs-source-dirs:
@@ -42,6 +42,7 @@ executable nester
     , bytes
     , bytestring
     , containers
+    , file-embed
     , llvm-hs-pretty
     , llvm-hs-pure
     , monad-extras

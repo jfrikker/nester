@@ -21,6 +21,7 @@ dependencies:
 - bytes
 - bytestring
 - containers
+- file-embed
 - llvm-hs-pretty
 - llvm-hs-pure
 - monad-extras

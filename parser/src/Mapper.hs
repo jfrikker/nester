@@ -1,8 +1,9 @@
-{-# LANGUAGE BlockArguments, OverloadedStrings, RecursiveDo #-}
+{-# LANGUAGE BlockArguments, OverloadedStrings, RecursiveDo, TemplateHaskell #-}
 module Mapper (
   Mapper(..),
   irqAddress,
   mapper0,
+  appleMapper,
   nmiAddress,
   readStaticAddress,
   readRom,
@@ -10,10 +11,12 @@ module Mapper (
   resetAddress
 ) where
 
-import Data.Bits (shiftL)
+import Data.Bits (shiftL, shift)
 import qualified Data.ByteString as BS
+import Data.FileEmbed (embedFile)
+import Data.Foldable (asum)
 import Data.Functor ((<&>))
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Word (Word64, Word16, Word8)
 import LLVM.AST (Definition(GlobalDefinition), Name)
 import qualified LLVM.AST.CallingConvention as CallingConvention
@@ -26,7 +29,7 @@ import qualified LLVM.AST.Linkage as Linkage
 import qualified LLVM.AST.Operand as Operand
 import LLVM.AST.Type (Type(ArrayType, VoidType), i8, i16, ptr)
 import qualified LLVM.AST.Type as Type
-import LLVM.AST.Operand (Operand)
+import LLVM.AST.Operand (Operand, DWOpFragment (offset))
 import LLVM.IRBuilder
 import LLVM.Types (callbackType)
 import Text.ParserCombinators.ReadP (endBy)
@@ -42,7 +45,7 @@ data Mapper = Mapper {
 readRom :: Word16 -> BS.ByteString -> Word16 -> Maybe Word8
 readRom offset rom idx
   | idx < offset = Nothing
-  | idx -  offset >= fromIntegral (BS.length rom) = Nothing
+  | idx - offset >= fromIntegral (BS.length rom) = Nothing
   | otherwise = Just $ BS.index rom (fromIntegral $ idx - offset)
 
 readStaticValue :: Word16 -> Mapper -> Word8
@@ -183,3 +186,18 @@ mapper0 prgRom chrRom = Mapper {
             Global.basicBlocks = execIRBuilder emptyIRBuilder $ ret (Operand.ConstantOperand $ Constant.GlobalReference (ptr $ ArrayType 0x2000 i8) "chrRom")
           }
         globals = [prgRomDef, chrRomDef, lowMemDef, cartMemDef, getChrRom]
+
+appleMon :: BS.ByteString 
+appleMon = $(embedFile "appleMon.bin")
+
+appleMapper :: Word16 -> BS.ByteString -> Mapper
+appleMapper off rom = Mapper {
+    readStatic = readStatic
+  }
+  where readStatic 0xfffe = fromIntegral off
+        readStatic 0xffff = fromIntegral $ shift off (-8)
+        readStatic 0xfffc = fromIntegral off
+        readStatic 0xfffd = fromIntegral $ shift off (-8)
+        readStatic 0xfffa = fromIntegral off
+        readStatic 0xfffb = fromIntegral $ shift off (-8)
+        readStatic memOff = fromMaybe 0 $ asum [readRom off rom memOff, readRom 0xff00 appleMon memOff]

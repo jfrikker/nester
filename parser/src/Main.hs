@@ -6,6 +6,7 @@ import Mapper (
   Mapper,
   irqAddress,
   mapper0,
+  appleMapper,
   nmiAddress,
   readRom,
   resetAddress
@@ -25,12 +26,15 @@ import Data.Function ((&))
 import qualified Data.Text.Lazy.IO as TIO
 import LLVM (toIRNes)
 import LLVM.Pretty (ppllvm)
-import Nes.File (
+import File (
+  AppleFile(appleOffset, appleRom),
   NesFile(chrRom, prgRom),
-  getNesFile)
+  getNesFile, getAppleFile
+  )
 import Options(
   Options(defineOptions),
   runSubcommand,
+  simpleOption,
   subcommand
   )
 import Passes (functionBodies, passBase, selfLoopPass, smbSwitchPass)
@@ -46,11 +50,19 @@ data EmptyOptions = EmptyOptions
 instance Options EmptyOptions where
     defineOptions = pure EmptyOptions
 
-disassemble :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
-disassemble _ _ [input, output] = do
+data DisassembleOptions  = DisassembleOptions {
+  disassembleFormat :: String
+}
+
+instance Options DisassembleOptions where
+  defineOptions = pure DisassembleOptions
+    <*> simpleOption "format" "nes"
+        "The input file format"
+
+disassemble :: EmptyOptions -> DisassembleOptions -> [String] -> IO ()
+disassemble _ options [input, output] = do
   buf <- BS.readFile input
-  let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  let mem = mapper0 (prgRom file) $ error "No chr rom"
+  let mem = readFile buf
   withFile output WriteMode $ \h -> do
     let reset = resetAddress mem
     hPutStrLn h [fmt|; Reset: {reset:04x}|]
@@ -65,6 +77,11 @@ disassemble _ _ [input, output] = do
       hPutStrLn h ""
       hPutStrLn h [fmt|{offset:04x}:|]
       for_ (Map.elems body) $ hPutStrLn h . toAssembly
+  where readFile = readFileInner $ disassembleFormat options
+        readFileInner "nes" buf = let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
+          in mapper0 (prgRom file) $ error "No chr rom"
+        readFileInner "apple" buf = let Done _ _ file = runGetIncremental getAppleFile `pushChunk` buf & pushEndOfInput
+          in appleMapper (appleOffset file) (appleRom file)
 
 llvm :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
 llvm _ _ [input, output] = do
