@@ -62,7 +62,7 @@ instance Options DisassembleOptions where
 disassemble :: EmptyOptions -> DisassembleOptions -> [String] -> IO ()
 disassemble _ options [input, output] = do
   buf <- BS.readFile input
-  let mem = readFile buf
+  let mem = readMapper (disassembleFormat options) buf
   withFile output WriteMode $ \h -> do
     let reset = resetAddress mem
     hPutStrLn h [fmt|; Reset: {reset:04x}|]
@@ -77,17 +77,20 @@ disassemble _ options [input, output] = do
       hPutStrLn h ""
       hPutStrLn h [fmt|{offset:04x}:|]
       for_ (Map.elems body) $ hPutStrLn h . toAssembly
-  where readFile = readFileInner $ disassembleFormat options
-        readFileInner "nes" buf = let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-          in mapper0 (prgRom file) $ error "No chr rom"
-        readFileInner "apple" buf = let Done _ _ file = runGetIncremental getAppleFile `pushChunk` buf & pushEndOfInput
-          in appleMapper (appleOffset file) (appleRom file)
 
-llvm :: EmptyOptions -> EmptyOptions -> [String] -> IO ()
-llvm _ _ [input, output] = do
+data LlvmOptions  = LlvmOptions {
+  llvmFormat :: String
+}
+
+instance Options LlvmOptions where
+  defineOptions = pure LlvmOptions
+    <*> simpleOption "format" "nes"
+        "The input file format"
+
+llvm :: EmptyOptions -> LlvmOptions -> [String] -> IO ()
+llvm _ options [input, output] = do
   buf <- BS.readFile input
-  let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  let mem = mapper0 (prgRom file) $ chrRom file
+  let mem = readMapper (llvmFormat options) buf
   withFile output WriteMode $ \h -> do
     let reset = resetAddress mem
     let nmi = nmiAddress mem
@@ -95,6 +98,12 @@ llvm _ _ [input, output] = do
     let parser = selfLoopPass $ smbSwitchPass passBase
     let functions = functionBodies parser [reset, nmi, irq] mem
     TIO.hPutStrLn h $ ppllvm $ toIRNes functions mem
+
+readMapper :: String -> BS.ByteString -> Mapper
+readMapper "nes" buf = let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
+  in mapper0 (prgRom file) $ error "No chr rom"
+readMapper "apple" buf = let Done _ _ file = runGetIncremental getAppleFile `pushChunk` buf & pushEndOfInput
+  in appleMapper (appleOffset file) (appleRom file)
 
 main :: IO ()
 main = do

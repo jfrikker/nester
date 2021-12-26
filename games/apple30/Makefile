@@ -9,8 +9,8 @@ game.a: game.o
 game.o: game-opt.ll
 	llc -O3 -filetype=obj -o $@ $^
 
-game.ll: game.nes
-	nester llvm $^ $@
+game.ll: apple30th.bin
+	nester llvm --format apple $^ $@
 
 game-opt.ll: game.ll
 	opt -O3 $^ -o $@

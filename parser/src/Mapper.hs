@@ -33,6 +33,7 @@ import LLVM.AST.Operand (Operand, DWOpFragment (offset))
 import LLVM.IRBuilder
 import LLVM.Types (callbackType)
 import Text.ParserCombinators.ReadP (endBy)
+import qualified Data.ByteString as Bs
 
 data Mapper = Mapper {
   readStatic :: Word16 -> Word8,
@@ -85,8 +86,8 @@ buildMem size name = (def, read, write)
           addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
           store addr' 0 val
 
-buildRom :: Word64 -> Name -> BS.ByteString -> (Definition, Operand -> IRBuilder Operand)
-buildRom size name contents = (def, read)
+buildRom :: Name -> BS.ByteString -> (Definition, Operand -> IRBuilder Operand)
+buildRom name contents = (def, read)
   where def = GlobalDefinition Global.globalVariableDefaults {
           Global.name = name,
           Global.type' = ArrayType size i8,
@@ -101,6 +102,7 @@ buildRom size name contents = (def, read)
         read addr = do
           addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True rom [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
           load addr' 0
+        size = fromIntegral $ BS.length contents
 
 mapper0 :: BS.ByteString -> BS.ByteString -> Mapper
 mapper0 prgRom chrRom = Mapper {
@@ -113,8 +115,8 @@ mapper0 prgRom chrRom = Mapper {
   where readStatic = fromJust . readRom 32768 prgRom
         (lowMemDef, readLowMem, writeLowMem) = buildMem 0x800 "lowMem"
         (cartMemDef, readCartMem, writeCartMem) = buildMem 0x2000 "cartMem"
-        (prgRomDef, readPrgRom) = buildRom 0x8000 "prgRom" prgRom
-        (chrRomDef, _) = buildRom 8192 "chrRom" chrRom
+        (prgRomDef, readPrgRom) = buildRom "prgRom" prgRom
+        (chrRomDef, _) = buildRom "chrRom" chrRom
         readBody addr readCallback = mdo
           _entry <- block `named` "entry"
           condLow <- icmp IntegerPredicate.ULT addr $ literalAddr 0x2000
@@ -190,9 +192,19 @@ mapper0 prgRom chrRom = Mapper {
 appleMon :: BS.ByteString 
 appleMon = $(embedFile "appleMon.bin")
 
+inRange :: Word16 -> Word16 -> Operand -> IRBuilder Operand
+inRange low high addr = do
+    condLow <- icmp IntegerPredicate.UGE addr $ literalAddr low
+    condHigh <- icmp IntegerPredicate.ULE addr $ literalAddr high
+    LLVM.IRBuilder.and condLow condHigh
+
 appleMapper :: Word16 -> BS.ByteString -> Mapper
 appleMapper off rom = Mapper {
-    readStatic = readStatic
+    readStatic = readStatic,
+    readBody = readBody,
+    writeBody = writeBody,
+    globals = globals,
+    mapperId = 0
   }
   where readStatic 0xfffe = fromIntegral off
         readStatic 0xffff = fromIntegral $ shift off (-8)
@@ -201,3 +213,38 @@ appleMapper off rom = Mapper {
         readStatic 0xfffa = fromIntegral off
         readStatic 0xfffb = fromIntegral $ shift off (-8)
         readStatic memOff = fromMaybe 0 $ asum [readRom off rom memOff, readRom 0xff00 appleMon memOff]
+        (memDef, readMem, writeMem) = buildMem 0x10000 "mem"
+        (prgRomDef, readPrgRom) = buildRom "rom" rom
+        readBody addr readCallback = mdo
+          _entry <- block `named` "entry"
+          condIO <- inRange 0xD010 0xD013 addr
+          condBr condIO ifIO elseIO
+          ifIO <- block `named` "ifIO"
+          ioVal <- readCallback addr
+          ret ioVal
+          elseIO <- block `named` "elseIO"
+          condRom <- inRange off (off + fromIntegral (BS.length rom)) addr
+          condBr condRom ifRom elseRom
+          ifRom <- block `named` "ifRom"
+          romLoc <- sub addr $ literalAddr off
+          romVal <- readPrgRom romLoc
+          ret romVal
+          elseRom <- block `named` "elseRom"
+          elseVal <- readMem addr
+          ret elseVal
+        writeBody addr val writeCallback = mdo
+          _entry <- block `named` "entry"
+          condIO <- inRange 0xD010 0xD013 addr
+          condBr condIO ifIO elseIO
+          ifIO <- block `named` "ifIO"
+          writeCallback addr val
+          retVoid
+          elseIO <- block `named` "elseIO"
+          condRom <- inRange off (off + fromIntegral (BS.length rom)) addr
+          condBr condRom ifRom elseRom
+          ifRom <- block `named` "ifRom"
+          retVoid
+          elseRom <- block `named` "elseRom"
+          writeMem addr val
+          retVoid
+        globals = [prgRomDef, memDef]
