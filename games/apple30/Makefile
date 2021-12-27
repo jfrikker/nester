@@ -1,10 +1,7 @@
 .PHONY: clean
 
-game: main.hs game.a
-	stack ghc -- -threaded -rtsopts -with-rtsopts=-N -o $@ $^
-
-game.a: game.o
-	ar -csr $@ $^
+game: game.o
+	gcc -o $@ $^
 
 game.o: game-opt.ll
 	llc -O3 -filetype=obj -o $@ $^

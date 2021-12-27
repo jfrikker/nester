@@ -70,6 +70,9 @@ nmiAddress = readStaticAddress 0xfffa
 literalAddr :: Word16 -> Operand
 literalAddr = Operand.ConstantOperand . Constant.Int 16 . fromIntegral
 
+literal :: Word8 -> Operand
+literal = Operand.ConstantOperand . Constant.Int 8 . fromIntegral
+
 buildMem :: Word64 -> Name -> (Definition, Operand -> IRBuilder Operand, Operand -> Operand -> IRBuilder ())
 buildMem size name = (def, read, write)
   where def = GlobalDefinition Global.globalVariableDefaults {
@@ -103,6 +106,32 @@ buildRom name contents = (def, read)
           addr' <- emitInstr (ptr i8) $ Instruction.GetElementPtr True rom [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
           load addr' 0
         size = fromIntegral $ BS.length contents
+
+buildGlobal :: Name -> Type.Type -> (Definition, IRBuilder Operand, Operand -> IRBuilder ())
+buildGlobal name type' = (def, read, write)
+  where def = GlobalDefinition Global.globalVariableDefaults {
+          Global.name = name,
+          Global.type' = type',
+          Global.linkage = Linkage.Private,
+          Global.initializer = Just $ Constant.Int 8 0
+        }
+        mem = Operand.ConstantOperand $ Constant.GlobalReference (ptr type') name
+        read = load mem 0
+        write = store mem 0
+
+putCharDef :: Definition
+putCharDef = GlobalDefinition Global.functionDefaults {
+  Global.name = "putchar",
+  Global.returnType = Type.i32,
+  Global.parameters = ([Global.Parameter Type.i8 "c" []], False)
+}
+
+putChar :: Operand
+putChar = Operand.ConstantOperand $ Constant.GlobalReference (ptr $ Type.FunctionType {
+  Type.resultType = Type.i32,
+  Type.argumentTypes = [Type.i8],
+  Type.isVarArg = False
+}) "putchar"
 
 mapper0 :: BS.ByteString -> BS.ByteString -> Mapper
 mapper0 prgRom chrRom = Mapper {
@@ -215,6 +244,7 @@ appleMapper off rom = Mapper {
         readStatic memOff = fromMaybe 0 $ asum [readRom off rom memOff, readRom 0xff00 appleMon memOff]
         (memDef, readMem, writeMem) = buildMem 0x10000 "mem"
         (prgRomDef, readPrgRom) = buildRom "rom" rom
+        (charCountDef, readCharCount, writeCharCount) = buildGlobal "charCount" Type.i8
         readBody addr readCallback = mdo
           _entry <- block `named` "entry"
           condIO <- inRange 0xD010 0xD013 addr
@@ -232,8 +262,34 @@ appleMapper off rom = Mapper {
           elseRom <- block `named` "elseRom"
           elseVal <- readMem addr
           ret elseVal
+        writeToScreen val = mdo
+          charToOutput <- LLVM.IRBuilder.and val $ literal 0x7f
+          condOutputNewLine <- icmp IntegerPredicate.EQ charToOutput $ literal 0x0d
+          condBr condOutputNewLine ifOutputNewLine elseOutputNewLine
+          ifOutputNewLine <- block `named` "ifOutputNewLine"
+          call Mapper.putChar [(literal 0x0a, [])]
+          writeCharCount $ literal 0
+          retVoid
+          elseOutputNewLine <- block `named` "elseOutputNewLine"
+          call Mapper.putChar [(charToOutput, [])]
+          charCount <- readCharCount
+          condNewLine <- icmp IntegerPredicate.UGE charCount $ literal 39
+          condBr condNewLine ifNewLine elseNewLine
+          ifNewLine <- block `named` "ifNewLine"
+          call Mapper.putChar [(literal 0x0a, [])]
+          writeCharCount $ literal 0
+          retVoid
+          elseNewLine <- block `named` "elseNewLine"
+          newCharCount <- add charCount $ literal 1
+          writeCharCount newCharCount
+          retVoid
         writeBody addr val writeCallback = mdo
           _entry <- block `named` "entry"
+          condDspData <- icmp IntegerPredicate.EQ addr $ literalAddr 0xD012
+          condBr condDspData ifDspData elseDspData
+          ifDspData <- block `named` "ifDspData"
+          writeToScreen val
+          elseDspData <- block `named` "elseDspData"
           condIO <- inRange 0xD010 0xD013 addr
           condBr condIO ifIO elseIO
           ifIO <- block `named` "ifIO"
@@ -247,4 +303,4 @@ appleMapper off rom = Mapper {
           elseRom <- block `named` "elseRom"
           writeMem addr val
           retVoid
-        globals = [prgRomDef, memDef]
+        globals = [putCharDef, prgRomDef, memDef, charCountDef]
