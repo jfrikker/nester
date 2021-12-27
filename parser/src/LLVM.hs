@@ -24,6 +24,8 @@ import LLVM.Types (callbackType)
 import qualified Mapper
 import Mapper(Mapper)
 import PyF (fmt)
+import Data.Bits (Bits(shift))
+import Assembly (offset)
 
 instFunctionType :: Type
 instFunctionType = FunctionType {
@@ -62,8 +64,8 @@ regS = regRef i8 "regS"
 regClk :: Operand
 regClk = regRef i16 "clk"
 
-addCarryDef :: Definition
-addCarryDef = GlobalDefinition functionDefaults {
+uaddCarryDef :: Definition
+uaddCarryDef = GlobalDefinition functionDefaults {
   G.name = "llvm.uadd.with.overflow.i8",
   G.returnType = StructureType {
     isPacked = False,
@@ -72,20 +74,85 @@ addCarryDef = GlobalDefinition functionDefaults {
   G.parameters = ([Parameter i8 "a" [], Parameter i8 "b" []], False)
 }
 
-addCarry :: Operand -> Operand -> IRBuilder (Operand, Operand)
+saddCarryDef :: Definition
+saddCarryDef = GlobalDefinition functionDefaults {
+  G.name = "llvm.sadd.with.overflow.i8",
+  G.returnType = StructureType {
+    isPacked = False,
+    elementTypes = [i8, i1]
+  },
+  G.parameters = ([Parameter i8 "a" [], Parameter i8 "b" []], False)
+}
+
+usubCarryDef :: Definition
+usubCarryDef = GlobalDefinition functionDefaults {
+  G.name = "llvm.usub.with.overflow.i8",
+  G.returnType = StructureType {
+    isPacked = False,
+    elementTypes = [i8, i1]
+  },
+  G.parameters = ([Parameter i8 "a" [], Parameter i8 "b" []], False)
+}
+
+ssubCarryDef :: Definition
+ssubCarryDef = GlobalDefinition functionDefaults {
+  G.name = "llvm.ssub.with.overflow.i8",
+  G.returnType = StructureType {
+    isPacked = False,
+    elementTypes = [i8, i1]
+  },
+  G.parameters = ([Parameter i8 "a" [], Parameter i8 "b" []], False)
+}
+
+addCarry :: Operand -> Operand -> IRBuilder (Operand, Operand, Operand)
 addCarry arg1 arg2 = do
-  resPacked <- call func [(arg1, []), (arg2, [])]
-  res <- extractValue resPacked [0]
-  carry <- extractValue resPacked [1]
-  return (res, carry)
-  where func = ConstantOperand $ C.GlobalReference FunctionType {
-    resultType = StructureType {
-      isPacked = False,
-      elementTypes = [i8, i1]
-    },
-    argumentTypes = [i8, i8],
-    isVarArg = False
-  } "llvm.uadd.with.overflow.i8"
+  resPackedU <- call uAdd [(arg1, []), (arg2, [])]
+  resPackedS <- call sAdd [(arg1, []), (arg2, [])]
+  res <- extractValue resPackedU [0]
+  carry <- extractValue resPackedU [1]
+  overflow <- extractValue resPackedS [1]
+  return (res, carry, overflow)
+  where uAdd = ConstantOperand $ C.GlobalReference FunctionType {
+          resultType = StructureType {
+            isPacked = False,
+            elementTypes = [i8, i1]
+          },
+          argumentTypes = [i8, i8],
+          isVarArg = False
+        } "llvm.uadd.with.overflow.i8"
+        sAdd = ConstantOperand $ C.GlobalReference FunctionType {
+          resultType = StructureType {
+            isPacked = False,
+            elementTypes = [i8, i1]
+          },
+          argumentTypes = [i8, i8],
+          isVarArg = False
+        } "llvm.sadd.with.overflow.i8"
+
+subCarry :: Operand -> Operand -> IRBuilder (Operand, Operand, Operand)
+subCarry arg1 arg2 = do
+  resPackedU <- call uSub [(arg1, []), (arg2, [])]
+  resPackedS <- call sSub [(arg1, []), (arg2, [])]
+  res <- extractValue resPackedU [0]
+  carry <- extractValue resPackedU [1]
+  overflow <- extractValue resPackedS [1]
+  return (res, carry, overflow)
+  where uSub = ConstantOperand $ C.GlobalReference FunctionType {
+          resultType = StructureType {
+            isPacked = False,
+            elementTypes = [i8, i1]
+          },
+          argumentTypes = [i8, i8],
+          isVarArg = False
+        } "llvm.usub.with.overflow.i8"
+        sSub = ConstantOperand $ C.GlobalReference FunctionType {
+          resultType = StructureType {
+            isPacked = False,
+            elementTypes = [i8, i1]
+          },
+          argumentTypes = [i8, i8],
+          isVarArg = False
+        } "llvm.ssub.with.overflow.i8"
 
 readMemDef :: Mapper -> Definition
 readMemDef mapper = GlobalDefinition $ functionDefaults {
@@ -161,7 +228,8 @@ resetDef mem = GlobalDefinition $ functionDefaults {
   G.parameters = ([], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
-  G.basicBlocks = body
+  G.basicBlocks = body,
+  G.functionAttributes = [Right FA.AlwaysInline]
   }
   where body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
@@ -184,7 +252,8 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
   G.parameters = ([], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
-  G.basicBlocks = body
+  G.basicBlocks = body,
+  G.functionAttributes = [Right FA.AlwaysInline]
   }
   where body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
@@ -197,12 +266,13 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
           s <- alloca i8 Nothing 0
           clk <- alloca i16 Nothing 0
           store clk 0 $ literalAddr 0
+          store s 0 $ literal 0
           call (functionAtAddr $ Mapper.nmiAddress mem) [(a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, []), (clk, [])]
           retVoid
 
 moduleDefs :: [Definition]
-moduleDefs = [addCarryDef]
+moduleDefs = [uaddCarryDef, saddCarryDef, usubCarryDef, ssubCarryDef]
 
 toIRNes :: Map Word16 (Map Word16 I.Instruction) -> Mapper -> Module
 toIRNes funcs mapper = defaultModule {
@@ -226,9 +296,6 @@ toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   }
   where body = execIRBuilder emptyIRBuilder $ mdo
           block `named` "entry"
-          alloca (ArrayType 10 i8) Nothing 0 `named` "stack"
-          sp <- alloca i64 Nothing 0 `named` "sp"
-          store sp 0 $ ConstantOperand $ C.Int 64 0
           br [fmt|lbl_{addr:04x}_0|]
           forM_ insts toIR
 
@@ -284,6 +351,8 @@ toIR_ (I.Absolute _ I.JMP arg) = do
   br [fmt|lbl_{arg:04x}_0|]
 toIR_ inst@(I.Absolute _ I.JSR arg) = do
   incrClk 6
+  _push $ literal $ fromIntegral $ I.offset inst
+  _push $ literal $ fromIntegral $ shift (I.offset inst) (-8)
   call (functionAtAddr arg) [(regA, []), (regX, []),
     (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, []), (regClk, [])]
   brNext inst
@@ -315,7 +384,10 @@ toIR_ inst@(I.Absolute _ I.ROR arg) = do
   absoluteValue arg >>= _ror
   incrClk 6
   brNext inst
-toIR_ inst@(I.Absolute _ I.SBC arg) = brNext inst -- TODO
+toIR_ inst@(I.Absolute _ I.SBC arg) = do
+  absoluteValue arg >>= _sbc
+  incrClk 4
+  brNext inst
 toIR_ inst@(I.Absolute _ I.STA arg) = do
   absoluteAddr arg >>= _store regA
   incrClk 4
@@ -393,7 +465,11 @@ toIR_ inst@(I.AbsoluteX _ I.ROR arg) = do
   writeMem addr newVal
   incrClk 7
   brNext inst
-toIR_ inst@(I.AbsoluteX _ I.SBC arg) = brNext inst -- TODO
+toIR_ inst@(I.AbsoluteX _ I.SBC arg) = do
+  absoluteXValue arg >>= _sbc
+  incrClk 4
+  incrClkPageBoundaryReg arg regX
+  brNext inst
 toIR_ inst@(I.AbsoluteX _ I.STA arg) = do
   absoluteXAddr arg >>= _store regA
   incrClk 5
@@ -433,7 +509,11 @@ toIR_ inst@(I.AbsoluteY _ I.ORA arg) = do
   incrClk 4
   incrClkPageBoundaryReg arg regY
   brNext inst
-toIR_ inst@(I.AbsoluteY _ I.SBC arg) = brNext inst -- TODO
+toIR_ inst@(I.AbsoluteY _ I.SBC arg) = do
+  absoluteYValue arg >>= _sbc
+  incrClk 4
+  incrClkPageBoundaryReg arg regY
+  brNext inst
 toIR_ inst@(I.AbsoluteY _ I.STA arg) = do
   absoluteYAddr arg >>= _store regA
   incrClk 5
@@ -455,6 +535,7 @@ toIR_ inst@(I.Immediate _ I.LDA arg) = do
 toIR_ inst@(I.Immediate _ I.LDX arg) = immediateValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.Immediate _ I.LDY arg) = immediateValue arg >>= _load regY >> brNext inst
 toIR_ inst@(I.Immediate _ I.ORA arg) = immediateValue arg >>= _ora >> brNext inst
+toIR_ inst@(I.Immediate _ I.SBC arg) = immediateValue arg >>= _sbc >> brNext inst
 toIR_ inst@(I.Implied _ I.CLC) = do
   store regC 0 $ ConstantOperand $ C.Int 1 0
   brNext inst
@@ -469,24 +550,19 @@ toIR_ inst@(I.Implied _ I.DEY) = modifyReg _decrement regY >> brNext inst
 toIR_ inst@(I.Implied _ I.INX) = modifyReg _increment regX >> brNext inst
 toIR_ inst@(I.Implied _ I.INY) = modifyReg _increment regY >> brNext inst
 toIR_ inst@(I.Implied _ I.PHA) = do
-  sp <- load (LocalReference (ptr i64) "sp_0") 0
   a <- load regA 0
-  stackLoc <- emitInstr (ptr i8) $ GetElementPtr True (LocalReference (ptr (ArrayType 10 i8)) "stack_0") [ConstantOperand $ C.Int 32 0, sp] []
-  store stackLoc 0 a
-  newSp <- add sp $ ConstantOperand $ C.Int 64 1
-  store (LocalReference (ptr i64) "sp_0") 0 newSp
+  _push a
   brNext inst
 toIR_ inst@(I.Implied _ I.PLA) = do
-  sp <- load (LocalReference (ptr i64) "sp_0") 0
-  newSp <- sub sp $ ConstantOperand $ C.Int 64 1
-  stackLoc <- emitInstr (ptr i8) $ GetElementPtr True (LocalReference (ptr (ArrayType 10 i8)) "stack_0") [ConstantOperand $ C.Int 32 0, sp] []
-  a <- load stackLoc 0
+  a <- _pop
   store regA 0 a
-  store (LocalReference (ptr i64) "sp_0") 0 newSp
   setNZ a
   brNext inst
 toIR_ (I.Implied _ I.RTI) = retVoid
-toIR_ (I.Implied _ I.RTS) = retVoid
+toIR_ (I.Implied _ I.RTS) = do
+  _pop
+  _pop
+  retVoid
 toIR_ inst@(I.Implied _ I.SEC) = do
   store regC 0 $ ConstantOperand $ C.Int 1 1
   brNext inst
@@ -503,11 +579,13 @@ toIR_ inst@(I.IndirectX _ I.AND arg) = indirectXValue arg >>= _and >> brNext ins
 toIR_ inst@(I.IndirectX _ I.EOR arg) = indirectXValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.IndirectX _ I.LDA arg) = indirectXValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.IndirectX _ I.ORA arg) = indirectXValue arg >>= _ora >> brNext inst
+toIR_ inst@(I.IndirectX _ I.SBC arg) = indirectXValue arg >>= _sbc >> brNext inst
 toIR_ inst@(I.IndirectY _ I.ADC arg) = indirectYValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.IndirectY _ I.AND arg) = indirectYValue arg >>= _and >> brNext inst
 toIR_ inst@(I.IndirectY _ I.EOR arg) = indirectYValue arg >>= _eor >> brNext inst
 toIR_ inst@(I.IndirectY _ I.LDA arg) = indirectYValue arg >>= _load regA >> brNext inst
 toIR_ inst@(I.IndirectY _ I.ORA arg) = indirectYValue arg >>= _ora >> brNext inst
+toIR_ inst@(I.IndirectY _ I.SBC arg) = indirectYValue arg >>= _sbc >> brNext inst
 toIR_ inst@(I.IndirectY _ I.STA arg) = indirectYAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.Relative _ I.BCC _) = do
   cond <- load regC 0
@@ -566,6 +644,7 @@ toIR_ inst@(I.Zeropage _ I.LDX arg) = zeropageValue arg >>= _load regX >> brNext
 toIR_ inst@(I.Zeropage _ I.LDY arg) = zeropageValue arg >>= _load regY >> brNext inst
 toIR_ inst@(I.Zeropage _ I.LSR arg) = zeropageAddr arg >>= modifyMem _lsr >> brNext inst
 toIR_ inst@(I.Zeropage _ I.ORA arg) = zeropageValue arg >>= _ora >> brNext inst
+toIR_ inst@(I.Zeropage _ I.SBC arg) = zeropageValue arg >>= _sbc >> brNext inst
 toIR_ inst@(I.Zeropage _ I.STA arg) = zeropageAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.Zeropage _ I.STX arg) = zeropageAddr arg >>= _store regX >> brNext inst
 toIR_ inst@(I.Zeropage _ I.STY arg) = zeropageAddr arg >>= _store regY >> brNext inst
@@ -579,6 +658,7 @@ toIR_ inst@(I.ZeropageX _ I.LDA arg) = zeropageXValue arg >>= _load regA >> brNe
 toIR_ inst@(I.ZeropageX _ I.LDY arg) = zeropageXValue arg >>= _load regY >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.LSR arg) = zeropageXValue arg >>= modifyMem _lsr >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.ORA arg) = zeropageXValue arg >>= _ora >> brNext inst
+toIR_ inst@(I.ZeropageX _ I.SBC arg) = zeropageXValue arg >>= _sbc >> brNext inst
 toIR_ inst@(I.ZeropageX _ I.STA arg) = zeropageXAddr arg >>= _store regA >> brNext inst
 toIR_ inst@(I.ZeropageY _ I.LDX arg) = zeropageYValue arg >>= _load regX >> brNext inst
 toIR_ inst@(I.ZeropageY _ I.STA arg) = zeropageYAddr arg >>= _store regA >> brNext inst
@@ -667,12 +747,15 @@ zeropageYValue arg = do
 _adc arg = do
   c <- load regC 0
   cExt <- zext c i8
-  v1 <- load regA 0
-  (v2, c2) <- addCarry v1 cExt
-  (v3, c3) <- addCarry v2 arg
-  setNZ v3
+  a1 <- load regA 0
+  (a2, c2, v2) <- addCarry a1 cExt
+  (a3, c3, v3) <- addCarry a2 arg
+  store regA 0 a3
+  setNZ a3
   carry <- LLVM.IRBuilder.or c2 c3
   store regC 0 carry
+  overflow <- LLVM.IRBuilder.or v2 v3
+  store regV 0 overflow
 _and arg = do
   a <- load regA 0
   newA <- LLVM.IRBuilder.and a arg
@@ -755,6 +838,32 @@ _transfer src tgt = do
   s <- load src 0
   store tgt 0 s
   setNZ s
+_push val = do
+  s <- load regS 0
+  bigS <- zext s i16
+  memLoc <- add bigS $ literalAddr 0x100
+  writeMem memLoc val
+  newS <- add s $ literal 1
+  store regS 0 newS
+_pop = do
+  s <- load regS 0
+  newS <- sub s $ literal 1
+  bigS <- zext newS i16
+  memLoc <- add bigS $ literalAddr 0x100
+  store regS 0 newS
+  readMem memLoc
+_sbc arg = do
+  c <- load regC 0
+  cExt <- zext c i8
+  a1 <- load regA 0
+  (a2, c2, v2) <- subCarry a1 cExt
+  (a3, c3, v3) <- subCarry a2 arg
+  store regA 0 a3
+  setNZ a3
+  carry <- LLVM.IRBuilder.or c2 c3
+  store regC 0 carry
+  overflow <- LLVM.IRBuilder.or v2 v3
+  store regV 0 overflow
 
 literal :: Word8 -> Operand
 literal = ConstantOperand . C.Int 8 . fromIntegral
