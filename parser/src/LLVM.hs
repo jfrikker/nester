@@ -5,27 +5,21 @@ module LLVM (
 
 import qualified Assembly as I
 import Control.Monad (forM_, void)
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Word (Word8, Word16)
 import LLVM.AST hiding (function)
-import qualified LLVM.AST.CallingConvention as CC
 import qualified LLVM.AST.Constant as C
 import qualified LLVM.AST.FunctionAttribute as FA
 import qualified LLVM.AST.Global as G
-import qualified LLVM.AST.Instruction as LI
 import qualified LLVM.AST.IntegerPredicate as P
 import qualified LLVM.AST.Linkage as L
-import LLVM.AST.Type (i1, i8, i16, i64, ptr)
+import LLVM.AST.Type (i1, i8, i16, ptr)
 import LLVM.IRBuilder
-import LLVM.Types (callbackType)
-import qualified Mapper
-import Mapper(Mapper)
+import qualified Mapper.Base as Mapper
+import Mapper.Base(Mapper)
 import PyF (fmt)
 import Data.Bits (Bits(shift))
-import Assembly (offset)
 
 instFunctionType :: Type
 instFunctionType = FunctionType {
@@ -163,9 +157,8 @@ readMemDef mapper = GlobalDefinition $ functionDefaults {
   G.basicBlocks = body
   }
   where addr = LocalReference i16 "addr"
-        clk = LocalReference (ptr i16) "clk"
         body = execIRBuilder emptyIRBuilder $ Mapper.readBody mapper addr doReadCallback
-        doReadCallback addr = return $ literal 0
+        doReadCallback _ = return $ literal 0
 
 readMem :: Operand -> IRBuilder Operand
 readMem addr = call func [(addr, []), (regClk, [])]
@@ -186,9 +179,8 @@ writeMemDef mapper = GlobalDefinition $ functionDefaults {
   }
   where addr = LocalReference i16 "addr"
         val = LocalReference i8 "val"
-        clk = LocalReference (ptr i16) "clk"
         body = execIRBuilder emptyIRBuilder $ Mapper.writeBody mapper addr val doWriteCallback
-        doWriteCallback addr val = return ()
+        doWriteCallback _ _ = return ()
 
 writeMem :: Operand -> Operand -> IRBuilder ()
 writeMem addr val = do void $ call func [(addr, []), (val, []), (regClk, [])]
@@ -197,15 +189,6 @@ writeMem addr val = do void $ call func [(addr, []), (val, []), (regClk, [])]
     argumentTypes = [i16, i8],
     isVarArg = False
   } "writeMem"
-
-mapperIdDef :: Mapper -> Definition
-mapperIdDef mapper = GlobalDefinition $ functionDefaults {
-  G.name = "mapperId",
-  G.parameters = ([], False),
-  G.returnType = i8,
-  G.basicBlocks = body
-  }
-  where body = execIRBuilder emptyIRBuilder $ ret (literal $ Mapper.mapperId mapper)
 
 mainDef :: Definition
 mainDef = GlobalDefinition $ functionDefaults {

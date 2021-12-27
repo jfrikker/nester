@@ -2,15 +2,6 @@
 
 module Main where
 
-import Mapper (
-  Mapper,
-  irqAddress,
-  mapper0,
-  appleMapper,
-  nmiAddress,
-  readRom,
-  resetAddress
-  )
 import Assembly (toAssembly)
 import Data.Binary.Get (
   Decoder(..),
@@ -21,16 +12,23 @@ import Data.Binary.Get (
 import qualified Data.ByteString as BS
 import Data.Foldable (for_)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust)
 import Data.Function ((&))
 import qualified Data.Text.Lazy.IO as TIO
-import LLVM (toIRNes)
-import LLVM.Pretty (ppllvm)
 import File (
   AppleFile(appleOffset, appleRom),
   NesFile(chrRom, prgRom),
   getNesFile, getAppleFile
   )
+import LLVM (toIRNes)
+import LLVM.Pretty (ppllvm)
+import Mapper.Apple (appleMapper)
+import Mapper.Base (
+  Mapper,
+  irqAddress,
+  nmiAddress,
+  resetAddress
+  )
+import Mapper.Mapper0 (mapper0)
 import Options(
   Options(defineOptions),
   runSubcommand,

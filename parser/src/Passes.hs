@@ -5,7 +5,7 @@ module Passes (
   smbSwitchPass
 ) where
 
-import Mapper (Mapper, readStaticAddress)
+import Mapper.Base (Mapper, readStaticAddress)
 import qualified Assembly as I
 import Data.Functor ((<&>))
 import Data.Map (Map, (!))

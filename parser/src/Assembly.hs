@@ -15,7 +15,7 @@ module Assembly (
   toAssembly
 ) where
 
-import Mapper (Mapper, readStaticAddress, readStaticValue)
+import Mapper.Base (Mapper, readStaticAddress, readStaticValue)
 import Control.Monad.Extra (iterateM)
 import Data.Int(Int8)
 import Data.Foldable (foldrM)
