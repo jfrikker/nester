@@ -242,6 +242,7 @@ resetDef mem = GlobalDefinition $ functionDefaults {
           s <- alloca i8 Nothing 0
           clk <- alloca i16 Nothing 0
           store clk 0 $ literalAddr 0
+          store s 0 $ literal 0
           call (functionAtAddr $ Mapper.resetAddress mem) [(a, []), (x, []), (y, []), (n, []),
             (z, []), (v, []), (c, []), (s, []), (clk, [])]
           retVoid
@@ -574,6 +575,7 @@ toIR_ inst@(I.Implied _ I.TAX) = _transfer regA regX >> brNext inst
 toIR_ inst@(I.Implied _ I.TAY) = _transfer regA regY >> brNext inst
 toIR_ inst@(I.Implied _ I.TXA) = _transfer regX regA >> brNext inst
 toIR_ inst@(I.Implied _ I.TXS) = _transfer regX regS >> brNext inst
+toIR_ inst@(I.Implied _ I.TYA) = _transfer regY regA >> brNext inst
 toIR_ inst@(I.IndirectX _ I.ADC arg) = indirectXValue arg >>= _adc >> brNext inst
 toIR_ inst@(I.IndirectX _ I.AND arg) = indirectXValue arg >>= _and >> brNext inst
 toIR_ inst@(I.IndirectX _ I.EOR arg) = indirectXValue arg >>= _eor >> brNext inst

@@ -251,7 +251,7 @@ readInstruction offset = readStaticValue offset >>= ri_
         ri_ 0x94 = readZeropageX STY
         ri_ 0x95 = readZeropageX STA
         ri_ 0x96 = readZeropageY STX
-        ri_ 0x98 = readImplied TAY
+        ri_ 0x98 = readImplied TYA
         ri_ 0x99 = readAbsoluteY STA
         ri_ 0x9a = readImplied TXS
         ri_ 0x9d = readAbsoluteX STA

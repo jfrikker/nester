@@ -123,7 +123,8 @@ putCharDef :: Definition
 putCharDef = GlobalDefinition Global.functionDefaults {
   Global.name = "putchar",
   Global.returnType = Type.i32,
-  Global.parameters = ([Global.Parameter Type.i8 "c" []], False)
+  Global.parameters = ([Global.Parameter Type.i8 "c" []], False),
+  Global.functionAttributes = [Right FunctionAttribute.WriteOnly]
 }
 
 putChar :: Operand
