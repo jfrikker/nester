@@ -99,7 +99,7 @@ llvm _ options [input, output] = do
 
 readMapper :: String -> BS.ByteString -> Mapper
 readMapper "nes" buf = let Done _ _ file = runGetIncremental getNesFile `pushChunk` buf & pushEndOfInput
-  in mapper0 (prgRom file) $ error "No chr rom"
+  in mapper0 (prgRom file) $ chrRom file
 readMapper "apple" buf = let Done _ _ file = runGetIncremental getAppleFile `pushChunk` buf & pushEndOfInput
   in appleMapper (appleOffset file) (appleRom file)
 

@@ -1,12 +1,9 @@
 {-# LANGUAGE BlockArguments, OverloadedStrings, RecursiveDo, TemplateHaskell #-}
 module Mapper.Util (
-  buildGlobal,
-  buildMem,
+  buildConstantAddr,
   buildRom,
   literal,
   literalAddr,
-  Mapper.Util.putChar,
-  putCharDef,
   readRom
 ) where
 
@@ -35,28 +32,11 @@ literalAddr = Operand.ConstantOperand . Constant.Int 16 . fromIntegral
 literal :: Word8 -> Operand
 literal = Operand.ConstantOperand . Constant.Int 8 . fromIntegral
 
-buildMem :: Word64 -> Name -> (Definition, Operand -> IRBuilder Operand, Operand -> Operand -> IRBuilder ())
-buildMem size name = (def, read, write)
+buildRom :: Name -> BS.ByteString -> (Definition, Operand)
+buildRom name contents = (def, rom)
   where def = GlobalDefinition Global.globalVariableDefaults {
           Global.name = name,
           Global.type' = Type.ArrayType size Type.i8,
-          Global.linkage = Linkage.Private,
-          Global.initializer = Just $ Constant.Null $ Type.ArrayType size Type.i8
-        }
-        mem = Operand.ConstantOperand $ Constant.GlobalReference (Type.ptr $ Type.ArrayType size Type.i8) name
-        read addr = do
-          addr' <- emitInstr (Type.ptr Type.i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
-          load addr' 0
-        write  addr val = do
-          addr' <- emitInstr (Type.ptr Type.i8) $ Instruction.GetElementPtr True mem [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
-          store addr' 0 val
-
-buildRom :: Name -> BS.ByteString -> (Definition, Operand -> IRBuilder Operand)
-buildRom name contents = (def, read)
-  where def = GlobalDefinition Global.globalVariableDefaults {
-          Global.name = name,
-          Global.type' = Type.ArrayType size Type.i8,
-          Global.linkage = Linkage.Private,
           Global.isConstant = True,
           Global.initializer = Just $ Constant.Array {
             Constant.memberType = Type.i8,
@@ -64,34 +44,14 @@ buildRom name contents = (def, read)
           }
         }
         rom = Operand.ConstantOperand $ Constant.GlobalReference (Type.ptr $ Type.ArrayType size Type.i8) name
-        read addr = do
-          addr' <- emitInstr (Type.ptr Type.i8) $ Instruction.GetElementPtr True rom [Operand.ConstantOperand $ Constant.Int 32 0, addr] []
-          load addr' 0
         size = fromIntegral $ BS.length contents
 
-buildGlobal :: Name -> Type.Type -> (Definition, IRBuilder Operand, Operand -> IRBuilder ())
-buildGlobal name type' = (def, read, write)
+buildConstantAddr :: Name -> Word16 -> (Definition, Operand)
+buildConstantAddr name contents = (def, symb)
   where def = GlobalDefinition Global.globalVariableDefaults {
           Global.name = name,
-          Global.type' = type',
-          Global.linkage = Linkage.Private,
-          Global.initializer = Just $ Constant.Int 8 0
+          Global.type' = Type.i16,
+          Global.isConstant = True,
+          Global.initializer = Just $ Constant.Int 16 $ fromIntegral contents
         }
-        mem = Operand.ConstantOperand $ Constant.GlobalReference (Type.ptr type') name
-        read = load mem 0
-        write = store mem 0
-
-putCharDef :: Definition
-putCharDef = GlobalDefinition Global.functionDefaults {
-  Global.name = "putchar",
-  Global.returnType = Type.i32,
-  Global.parameters = ([Global.Parameter Type.i8 "c" []], False),
-  Global.functionAttributes = [Right FunctionAttribute.WriteOnly]
-}
-
-putChar :: Operand
-putChar = Operand.ConstantOperand $ Constant.GlobalReference (Type.ptr $ Type.FunctionType {
-  Type.resultType = Type.i32,
-  Type.argumentTypes = [Type.i8],
-  Type.isVarArg = False
-}) "putchar"
+        symb = Operand.ConstantOperand $ Constant.GlobalReference Type.i16 name

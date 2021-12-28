@@ -152,13 +152,8 @@ readMemDef :: Mapper -> Definition
 readMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "readMem",
   G.parameters = ([Parameter i16 "addr" [], Parameter (ptr i16) "clk" []], False),
-  G.returnType = i8,
-  G.linkage = L.Private,
-  G.basicBlocks = body
+  G.returnType = i8
   }
-  where addr = LocalReference i16 "addr"
-        body = execIRBuilder emptyIRBuilder $ Mapper.readBody mapper addr doReadCallback
-        doReadCallback _ = return $ literal 0
 
 readMem :: Operand -> IRBuilder Operand
 readMem addr = call func [(addr, []), (regClk, [])]
@@ -173,14 +168,8 @@ writeMemDef mapper = GlobalDefinition $ functionDefaults {
   G.name = "writeMem",
   G.parameters = ([Parameter i16 "addr" [],
                    Parameter i8 "val" [], Parameter (ptr i16) "clk" []], False),
-  G.returnType = VoidType,
-  G.linkage = L.Private,
-  G.basicBlocks = body
+  G.returnType = VoidType
   }
-  where addr = LocalReference i16 "addr"
-        val = LocalReference i8 "val"
-        body = execIRBuilder emptyIRBuilder $ Mapper.writeBody mapper addr val doWriteCallback
-        doWriteCallback _ _ = return ()
 
 writeMem :: Operand -> Operand -> IRBuilder ()
 writeMem addr val = do void $ call func [(addr, []), (val, []), (regClk, [])]
@@ -190,27 +179,11 @@ writeMem addr val = do void $ call func [(addr, []), (val, []), (regClk, [])]
     isVarArg = False
   } "writeMem"
 
-mainDef :: Definition
-mainDef = GlobalDefinition $ functionDefaults {
-  G.name = "main",
-  G.parameters = ([], False),
-  G.returnType = VoidType,
-  G.basicBlocks = body
-  }
-  where body = execIRBuilder emptyIRBuilder $ do
-          call (ConstantOperand $ C.GlobalReference (ptr FunctionType {
-            resultType = VoidType,
-            argumentTypes = [],
-            isVarArg = False
-          }) "reset") []
-          retVoid
-
 resetDef :: Mapper -> Definition
 resetDef mem = GlobalDefinition $ functionDefaults {
   G.name = "reset",
   G.parameters = ([], False),
   G.returnType = VoidType,
-  G.linkage = L.Private,
   G.basicBlocks = body,
   G.functionAttributes = [Right FA.AlwaysInline]
   }
@@ -235,7 +208,6 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
   G.name = "nmi",
   G.parameters = ([], False),
   G.returnType = VoidType,
-  G.linkage = L.Private,
   G.basicBlocks = body,
   G.functionAttributes = [Right FA.AlwaysInline]
   }
@@ -261,7 +233,7 @@ moduleDefs = [uaddCarryDef, saddCarryDef, usubCarryDef, ssubCarryDef]
 toIRNes :: Map Word16 (Map Word16 I.Instruction) -> Mapper -> Module
 toIRNes funcs mapper = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ Mapper.globals mapper ++ [readMemDef mapper, writeMemDef mapper, resetDef mapper, nmiDef mapper, mainDef] ++ irFuncs
+  moduleDefinitions = moduleDefs ++ Mapper.globals mapper ++ [readMemDef mapper, writeMemDef mapper, resetDef mapper, nmiDef mapper] ++ irFuncs
   }
   where irFuncs = map (\(off, body) -> toIRFunction off $ Map.elems body) $ Map.assocs funcs
 
