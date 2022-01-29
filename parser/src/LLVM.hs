@@ -14,6 +14,7 @@ import qualified LLVM.AST.FunctionAttribute as FA
 import qualified LLVM.AST.Global as G
 import qualified LLVM.AST.IntegerPredicate as P
 import qualified LLVM.AST.Linkage as L
+import qualified LLVM.AST.ParameterAttribute as PA
 import LLVM.AST.Type (i1, i8, i16, ptr)
 import LLVM.IRBuilder
 import qualified Mapper.Base as Mapper
@@ -33,31 +34,31 @@ regRef :: Type -> Name -> Operand
 regRef type' = LocalReference (ptr type')
 
 regA :: Operand
-regA = regRef i8 "regA"
+regA = regRef i8 "regA_0"
 
 regX :: Operand
-regX = regRef i8 "regX"
+regX = regRef i8 "regX_0"
 
 regY :: Operand
-regY = regRef i8 "regY"
+regY = regRef i8 "regY_0"
 
 regN :: Operand
-regN = regRef i1 "regN"
+regN = regRef i1 "regN_0"
 
 regZ :: Operand
-regZ = regRef i1 "regZ"
+regZ = regRef i1 "regZ_0"
 
 regV :: Operand
-regV = regRef i1 "regV"
+regV = regRef i1 "regV_0"
 
 regC :: Operand
-regC = regRef i1 "regC"
+regC = regRef i1 "regC_0"
 
 regS :: Operand
-regS = regRef i8 "regS"
+regS = regRef i8 "regS_0"
 
 regClk :: Operand
-regClk = regRef i16 "clk"
+regClk = regRef i16 "clk_0"
 
 uaddCarryDef :: Definition
 uaddCarryDef = GlobalDefinition functionDefaults {
@@ -195,8 +196,7 @@ resetDef mem = GlobalDefinition $ functionDefaults {
   G.name = "reset",
   G.parameters = ([], False),
   G.returnType = VoidType,
-  G.basicBlocks = body,
-  G.functionAttributes = [Right FA.AlwaysInline]
+  G.basicBlocks = body
   }
   where body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
@@ -219,8 +219,7 @@ nmiDef mem = GlobalDefinition $ functionDefaults {
   G.name = "nmi",
   G.parameters = ([], False),
   G.returnType = VoidType,
-  G.basicBlocks = body,
-  G.functionAttributes = [Right FA.AlwaysInline]
+  G.basicBlocks = body
   }
   where body = execIRBuilder emptyIRBuilder $ do
           a <- alloca i8 Nothing 0
@@ -263,6 +262,33 @@ toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   where regAttrs = [PA.NoCapture, PA.NoAlias]
         body = execIRBuilder emptyIRBuilder $ mdo
           block `named` "entry"
+          a <- alloca i8 Nothing 0 `named` "regA"
+          x <- alloca i8 Nothing 0 `named` "regX"
+          y <- alloca i8 Nothing 0 `named` "regY"
+          n <- alloca i1 Nothing 0 `named` "regN"
+          z <- alloca i1 Nothing 0 `named` "regZ"
+          v <- alloca i1 Nothing 0 `named` "regV"
+          c <- alloca i1 Nothing 0 `named` "regC"
+          s <- alloca i8 Nothing 0 `named` "regS"
+          clk <- alloca i16 Nothing 0 `named` "clk"
+          a' <- load (LocalReference (ptr i8) "regA") 0
+          store a 0 a'
+          x' <- load (LocalReference (ptr i8) "regX") 0
+          store x 0 x'
+          y' <- load (LocalReference (ptr i8) "regY") 0
+          store y 0 y'
+          n' <- load (LocalReference (ptr i1) "regN") 0
+          store n 0 n'
+          z' <- load (LocalReference (ptr i1) "regZ") 0
+          store z 0 z'
+          v' <- load (LocalReference (ptr i1) "regV") 0
+          store v 0 v'
+          c' <- load (LocalReference (ptr i1) "regC") 0
+          store c 0 c'
+          s' <- load (LocalReference (ptr i8) "regS") 0
+          store s 0 s'
+          clk' <- load (LocalReference (ptr i16) "clk") 0
+          store clk 0 clk'
           br [fmt|lbl_{addr:04x}_0|]
           forM_ insts toIR
 
@@ -320,8 +346,46 @@ toIR_ inst@(I.Absolute _ I.JSR arg) = do
   incrClk 6
   _push $ literal $ fromIntegral $ I.offset inst
   _push $ literal $ fromIntegral $ shift (I.offset inst) (-8)
-  call (functionAtAddr arg) [(regA, []), (regX, []),
-    (regY, []), (regN, []), (regZ, []), (regV, []), (regC, []), (regS, []), (regClk, [])]
+  a <- load regA 0
+  store (LocalReference (ptr i8) "regA") 0 a
+  x <- load regX 0
+  store (LocalReference (ptr i8) "regX") 0 x
+  y <- load regY 0
+  store (LocalReference (ptr i8) "regY") 0 y
+  n <- load regN 0
+  store (LocalReference (ptr i1) "regN") 0 n
+  z <- load regZ 0
+  store (LocalReference (ptr i1) "regZ") 0 z
+  v <- load regV 0
+  store (LocalReference (ptr i1) "regV") 0 v
+  c <- load regC 0
+  store (LocalReference (ptr i1) "regC") 0 c
+  s <- load regS 0
+  store (LocalReference (ptr i8) "regS") 0 s
+  clk <- load regClk 0
+  store (LocalReference (ptr i16) "clk") 0 clk
+  call (functionAtAddr arg) [(LocalReference (ptr i8) "regA", []), (LocalReference (ptr i8) "regX", []),
+    (LocalReference (ptr i8) "regY", []), (LocalReference (ptr i1) "regN", []), (LocalReference (ptr i1) "regZ", []),
+    (LocalReference (ptr i1) "regV", []), (LocalReference (ptr i1) "regC", []),
+    (LocalReference (ptr i8) "regS", []), (LocalReference (ptr i16) "clk", [])]
+  a' <- load (LocalReference (ptr i8) "regA") 0
+  store regA 0 a'
+  x' <- load (LocalReference (ptr i8) "regX") 0
+  store regX 0 x'
+  y' <- load (LocalReference (ptr i8) "regY") 0
+  store regY 0 y'
+  n' <- load (LocalReference (ptr i1) "regN") 0
+  store regN 0 n'
+  z' <- load (LocalReference (ptr i1) "regZ") 0
+  store regZ 0 z'
+  v' <- load (LocalReference (ptr i1) "regV") 0
+  store regV 0 v'
+  c' <- load (LocalReference (ptr i1) "regC") 0
+  store regC 0 c'
+  s' <- load (LocalReference (ptr i8) "regS") 0
+  store regS 0 s'
+  clk' <- load (LocalReference (ptr i16) "clk") 0
+  store regClk 0 clk'
   brNext inst
 toIR_ inst@(I.Absolute _ I.LDA arg) = do
   absoluteValue arg >>= _load regA
@@ -527,6 +591,24 @@ toIR_ inst@(I.Implied _ I.PLA) = do
   brNext inst
 toIR_ (I.Implied _ I.RTI) = retVoid
 toIR_ (I.Implied _ I.RTS) = do
+  a <- load regA 0
+  store (LocalReference (ptr i8) "regA") 0 a
+  x <- load regX 0
+  store (LocalReference (ptr i8) "regX") 0 x
+  y <- load regY 0
+  store (LocalReference (ptr i8) "regY") 0 y
+  n <- load regN 0
+  store (LocalReference (ptr i1) "regN") 0 n
+  z <- load regZ 0
+  store (LocalReference (ptr i1) "regZ") 0 z
+  v <- load regV 0
+  store (LocalReference (ptr i1) "regV") 0 v
+  c <- load regC 0
+  store (LocalReference (ptr i1) "regC") 0 c
+  s <- load regS 0
+  store (LocalReference (ptr i8) "regS") 0 s
+  clk <- load regClk 0
+  store (LocalReference (ptr i16) "clk") 0 clk
   _pop
   _pop
   retVoid
