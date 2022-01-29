@@ -20,6 +20,7 @@ import qualified Mapper.Base as Mapper
 import Mapper.Base(Mapper)
 import PyF (fmt)
 import Data.Bits (Bits(shift))
+import qualified LLVM.AST.ParameterAttribute as PA
 
 instFunctionType :: Type
 instFunctionType = FunctionType {
@@ -148,34 +149,44 @@ subCarry arg1 arg2 = do
           isVarArg = False
         } "llvm.ssub.with.overflow.i8"
 
-readMemDef :: Mapper -> Definition
-readMemDef mapper = GlobalDefinition $ functionDefaults {
+readMemDef :: Definition
+readMemDef = GlobalDefinition $ functionDefaults {
   G.name = "readMem",
-  G.parameters = ([Parameter i16 "addr" [], Parameter (ptr i16) "clk" []], False),
-  G.returnType = i8
+  G.parameters = ([Parameter i16 "addr" [], Parameter i16 "clk" []], False),
+  G.returnType = i8,
+  G.functionAttributes = [Right FA.InaccessibleMemOnly]
   }
 
 readMem :: Operand -> IRBuilder Operand
-readMem addr = call func [(addr, []), (regClk, [])]
+readMem addr = do
+  clk <- load regClk 0
+  res <- call func [(addr, []), (clk, [])]
+  store regClk 0 $ literalAddr 0
+  return res
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = i8,
-    argumentTypes = [i16],
+    argumentTypes = [i16, i16],
     isVarArg = False
   } "readMem"
 
-writeMemDef :: Mapper -> Definition
-writeMemDef mapper = GlobalDefinition $ functionDefaults {
+writeMemDef :: Definition
+writeMemDef = GlobalDefinition $ functionDefaults {
   G.name = "writeMem",
   G.parameters = ([Parameter i16 "addr" [],
-                   Parameter i8 "val" [], Parameter (ptr i16) "clk" []], False),
-  G.returnType = VoidType
+                   Parameter i8 "val" [],
+                   Parameter i16 "clk" []], False),
+  G.returnType = VoidType,
+  G.functionAttributes = [Right FA.InaccessibleMemOnly]
   }
 
 writeMem :: Operand -> Operand -> IRBuilder ()
-writeMem addr val = do void $ call func [(addr, []), (val, []), (regClk, [])]
+writeMem addr val = do 
+  clk <- load regClk 0
+  void $ call func [(addr, []), (val, []), (clk, [])]
+  store regClk 0 $ literalAddr 0
   where func = ConstantOperand $ C.GlobalReference FunctionType {
     resultType = VoidType,
-    argumentTypes = [i16, i8],
+    argumentTypes = [i16, i8, i16],
     isVarArg = False
   } "writeMem"
 
@@ -233,24 +244,24 @@ moduleDefs = [uaddCarryDef, saddCarryDef, usubCarryDef, ssubCarryDef]
 toIRNes :: Map Word16 (Map Word16 I.Instruction) -> Mapper -> Module
 toIRNes funcs mapper = defaultModule {
   moduleName = "nes",
-  moduleDefinitions = moduleDefs ++ Mapper.globals mapper ++ [readMemDef mapper, writeMemDef mapper, resetDef mapper, nmiDef mapper] ++ irFuncs
+  moduleDefinitions = moduleDefs ++ Mapper.globals mapper ++ [readMemDef, writeMemDef, resetDef mapper, nmiDef mapper] ++ irFuncs
   }
   where irFuncs = map (\(off, body) -> toIRFunction off $ Map.elems body) $ Map.assocs funcs
 
 toIRFunction :: Word16 -> [I.Instruction] -> Definition
 toIRFunction addr insts = GlobalDefinition $ functionDefaults {
   G.name = [fmt|func_{addr:04x}|],
-  G.parameters = ([Parameter (ptr i8) "regA" [],
-                   Parameter (ptr i8) "regX" [], Parameter (ptr i8) "regY" [],
-                   Parameter (ptr i1) "regN" [], Parameter (ptr i1) "regZ" [],
-                   Parameter (ptr i1) "regV" [], Parameter (ptr i1) "regC" [],
-                   Parameter (ptr i8) "regS" [], Parameter (ptr i16) "clk" []], False),
+  G.parameters = ([Parameter (ptr i8) "regA" regAttrs,
+                   Parameter (ptr i8) "regX" regAttrs, Parameter (ptr i8) "regY" regAttrs,
+                   Parameter (ptr i1) "regN" regAttrs, Parameter (ptr i1) "regZ" regAttrs,
+                   Parameter (ptr i1) "regV" regAttrs, Parameter (ptr i1) "regC" regAttrs,
+                   Parameter (ptr i8) "regS" regAttrs, Parameter (ptr i16) "clk" regAttrs], False),
   G.returnType = VoidType,
   G.linkage = L.Private,
-  G.basicBlocks = body,
-  G.functionAttributes = [Right FA.AlwaysInline]
+  G.basicBlocks = body
   }
-  where body = execIRBuilder emptyIRBuilder $ mdo
+  where regAttrs = [PA.NoCapture, PA.NoAlias]
+        body = execIRBuilder emptyIRBuilder $ mdo
           block `named` "entry"
           br [fmt|lbl_{addr:04x}_0|]
           forM_ insts toIR
