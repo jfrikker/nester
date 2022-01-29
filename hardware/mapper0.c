@@ -1,7 +1,8 @@
 #include <stdint.h>
 #include <unistd.h>
 
-extern uint8_t* prgRom;
+extern uint8_t prgRom[32768];
+extern uint8_t chrRom[8192];
 uint8_t lowMem[0x800];
 uint8_t mem[0x10000];
 
@@ -55,6 +56,11 @@ uint8_t readMem(uint16_t addr) {
 }
 
 int main() {
+  externalWrite(0x2006, 0x00);
+  externalWrite(0x2006, 0x20);
+  for (int i = 0; i < 0x2000; i++) {
+    externalWrite(0x2007, chrRom[i]);
+  }
   reset();
   return 0;
 }
