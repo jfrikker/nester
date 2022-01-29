@@ -31,7 +31,7 @@ void print(uint8_t c) {
   }
 }
 
-void writeMem(uint16_t addr, uint8_t val, uint16_t *clock) {
+void writeMem(uint16_t addr, uint8_t val) {
   #ifdef DEBUG_MEM
   printf("Writing %04X: %02X\n", addr, val);
   #endif
@@ -42,7 +42,7 @@ void writeMem(uint16_t addr, uint8_t val, uint16_t *clock) {
   }
 }
 
-uint8_t readMem(uint16_t addr, uint16_t *clock) {
+uint8_t readMem(uint16_t addr) {
   #ifdef DEBUG_MEM
   printf("Reading %04X\n", addr);
   #endif
