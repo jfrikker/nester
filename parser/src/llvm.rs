@@ -93,7 +93,6 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
   pub fn declare_func(&mut self, addr: u16) {
     let i8_type = self.context.i8_type().into();
     let i1_type = self.context.bool_type().into();
-    let i16_type = self.context.i16_type().into();
     let ret_ty = function_return_type(self.context);
     let fn_type = ret_ty.fn_type(&[
       i8_type, // A
@@ -103,12 +102,8 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
       i1_type, // Z
       i1_type, // V
       i1_type, // C
-      i8_type, // S
-      i16_type, // Clk
       ], false);
-    let func = self.module.add_function(&function_name(addr), fn_type, Some(Linkage::Private));
-    let sret = self.context.create_enum_attribute(SRET, 0);
-    // func.add_attribute(AttributeLoc::Param(0), sret);
+    self.module.add_function(&function_name(addr), fn_type, Some(Linkage::Private));
   }
 
   pub fn define_func(&mut self, addr: u16, body: &BTreeMap<u16, Instruction>) {
@@ -130,13 +125,12 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let fn_type = self.context.void_type().fn_type(&[], false);
     let i8_zero = self.context.i8_type().const_zero();
     let i1_zero = self.context.bool_type().const_zero();
-    let i16_zero = self.context.i16_type().const_zero();
     let function = self.module.add_function(name, fn_type, None);
     let entry = self.context.append_basic_block(function, "entry");
     self.builder.position_at_end(entry);
     let inner = self.module.get_function(&function_name(addr)).unwrap();
     self.builder.build_call(inner, &[i8_zero.into(), i8_zero.into(), i8_zero.into(), i1_zero.into(),
-      i1_zero.into(), i1_zero.into(), i1_zero.into(), i8_zero.into(), i16_zero.into()], "res");
+      i1_zero.into(), i1_zero.into(), i1_zero.into()], "res");
     self.builder.build_return(None);
   }
 }
@@ -165,8 +159,6 @@ struct FunctionCompiler<'a, 'b, 'ctx> {
   reg_z: PointerValue<'ctx>,
   reg_v: PointerValue<'ctx>,
   reg_c: PointerValue<'ctx>,
-  reg_s: PointerValue<'ctx>,
-  reg_clk: PointerValue<'ctx>,
 }
 
 impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
@@ -181,8 +173,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     let reg_z = compiler.builder.build_alloca(compiler.context.bool_type(), "regZ");
     let reg_v = compiler.builder.build_alloca(compiler.context.bool_type(), "regV");
     let reg_c = compiler.builder.build_alloca(compiler.context.bool_type(), "regC");
-    let reg_s = compiler.builder.build_alloca(compiler.context.i8_type(), "regS");
-    let reg_clk = compiler.builder.build_alloca(compiler.context.i16_type(), "clk");
     compiler.builder.build_store(reg_a, function.get_nth_param(0).unwrap().into_int_value());
     compiler.builder.build_store(reg_x, function.get_nth_param(1).unwrap().into_int_value());
     compiler.builder.build_store(reg_y, function.get_nth_param(2).unwrap().into_int_value());
@@ -190,8 +180,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     compiler.builder.build_store(reg_z, function.get_nth_param(4).unwrap().into_int_value());
     compiler.builder.build_store(reg_v, function.get_nth_param(5).unwrap().into_int_value());
     compiler.builder.build_store(reg_c, function.get_nth_param(6).unwrap().into_int_value());
-    compiler.builder.build_store(reg_s, function.get_nth_param(7).unwrap().into_int_value());
-    compiler.builder.build_store(reg_clk, function.get_nth_param(8).unwrap().into_int_value());
 
     Self {
       compiler,
@@ -206,8 +194,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       reg_z,
       reg_v,
       reg_c,
-      reg_s,
-      reg_clk,
     }
   }
 
@@ -296,10 +282,8 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let z = self.builder.build_load(self.reg_z, "z");
         let v = self.builder.build_load(self.reg_v, "v");
         let c = self.builder.build_load(self.reg_c, "c");
-        let s = self.builder.build_load(self.reg_s, "s");
-        let clk = self.builder.build_load(self.reg_clk, "clk");
         let function = self.compiler.module.get_function(&function_name(*addr)).unwrap();
-        let res = self.builder.build_call(function, &[a.into(), x.into(), y.into(), n.into(), z.into(), v.into(), c.into(), s.into(), clk.into()], "res").try_as_basic_value().unwrap_left().into_struct_value();
+        let res = self.builder.build_call(function, &[a.into(), x.into(), y.into(), n.into(), z.into(), v.into(), c.into()], "res").try_as_basic_value().unwrap_left().into_struct_value();
         let a = self.builder.build_extract_value(res, 0, "new_a").unwrap();
         self.builder.build_store(self.reg_a, a);
         let x = self.builder.build_extract_value(res, 1, "new_x").unwrap();
@@ -314,10 +298,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.builder.build_store(self.reg_v, v);
         let c = self.builder.build_extract_value(res, 6, "new_c").unwrap();
         self.builder.build_store(self.reg_c, c);
-        let s = self.builder.build_extract_value(res, 7, "new_s").unwrap();
-        self.builder.build_store(self.reg_s, s);
-        let clk = self.builder.build_extract_value(res, 8, "new_clk").unwrap();
-        self.builder.build_store(self.reg_clk, clk);
       },
       Instruction::Absolute { opcode: Opcode::LDA, addr, .. } => {
         let arg = self.absolute_value(*addr);
@@ -374,13 +354,13 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.incr_clk(4);
       },
       Instruction::AbsoluteX { opcode: Opcode::ADC, addr, .. } => {
-        let addr = self.absolute_x_value(*addr);
-        self.adc(addr);
+        let arg = self.absolute_x_value(*addr);
+        self.adc(arg);
         self.incr_clk(4);
       },
       Instruction::AbsoluteX { opcode: Opcode::AND, addr, .. } => {
-        let addr = self.absolute_x_value(*addr);
-        self.and(addr);
+        let arg = self.absolute_x_value(*addr);
+        self.and(arg);
         self.incr_clk(4);
       },
       Instruction::AbsoluteX { opcode: Opcode::ASL, addr, .. } => {
@@ -504,6 +484,66 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.builder.build_store(self.reg_a, val);
         self.incr_clk(7);
       },
+      Instruction::Immediate { opcode: Opcode::ADC, val, .. } => {
+        self.adc(self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::AND, val, .. } => {
+        self.and(self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::CMP, val, .. } => {
+        self.compare(self.reg_a, self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::CPX, val, .. } => {
+        self.compare(self.reg_x, self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::CPY, val, .. } => {
+        self.compare(self.reg_y, self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::EOR, val, .. } => {
+        self.eor(self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::LDA, val, .. } => {
+        self.load(self.reg_a, self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(2);
+      },
+      Instruction::Immediate { opcode: Opcode::LDX, val, .. } => {
+        self.load(self.reg_x, self.context.i8_type().const_int(*val as u64, false));
+      },
+      Instruction::Immediate { opcode: Opcode::LDY, val, .. } => {
+        self.load(self.reg_y, self.context.i8_type().const_int(*val as u64, false));
+      },
+      Instruction::Immediate { opcode: Opcode::ORA, val, .. } => {
+        self.ora(self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Immediate { opcode: Opcode::SBC, val, .. } => {
+        self.sbc(self.context.i8_type().const_int(*val as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Implied { opcode: Opcode::CLC, .. } => {
+        self.builder.build_store(self.reg_c, self.context.bool_type().const_zero());
+      },
+      Instruction::Implied { opcode: Opcode::CLV, .. } => {
+        self.builder.build_store(self.reg_v, self.context.bool_type().const_zero());
+      },
+      Instruction::Implied { opcode: Opcode::DEX, .. } => {
+        self.decrement_reg(self.reg_x);
+      },
+      Instruction::Implied { opcode: Opcode::DEY, .. } => {
+        self.decrement_reg(self.reg_y);
+      },
+      Instruction::Implied { opcode: Opcode::INX, .. } => {
+        self.increment_reg(self.reg_x);
+      },
+      Instruction::Implied { opcode: Opcode::INY, .. } => {
+        self.increment_reg(self.reg_y);
+      },
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
         self.pop();
         self.pop();
@@ -522,21 +562,22 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let ret = self.builder.build_insert_value(ret, v, 5, "ret").unwrap();
         let c = self.builder.build_load(self.reg_c, "c");
         let ret = self.builder.build_insert_value(ret, c, 6, "ret").unwrap();
-        let s = self.builder.build_load(self.reg_s, "s");
-        let ret = self.builder.build_insert_value(ret, s, 7, "ret").unwrap();
-        let clk = self.builder.build_load(self.reg_clk, "clk");
-        let ret = self.builder.build_insert_value(ret, clk, 8, "ret").unwrap();
         self.builder.build_return(Some(&ret));
       },
-      Instruction::Immediate { opcode: Opcode::LDA, val, .. } => {
-        self.load(self.reg_a, self.context.i8_type().const_int(*val as u64, false));
-        self.incr_clk(2);
+      Instruction::Implied { opcode: Opcode::SEC, .. } => {
+        self.builder.build_store(self.reg_c, self.context.bool_type().const_all_ones());
       },
-      Instruction::Immediate { opcode: Opcode::LDX, val, .. } => {
-        self.load(self.reg_x, self.context.i8_type().const_int(*val as u64, false));
+      Instruction::Implied { opcode: Opcode::TAX, .. } => {
+        self.transfer(self.reg_a, self.reg_x);
       },
-      Instruction::Immediate { opcode: Opcode::LDY, val, .. } => {
-        self.load(self.reg_y, self.context.i8_type().const_int(*val as u64, false));
+      Instruction::Implied { opcode: Opcode::TAY, .. } => {
+        self.transfer(self.reg_a, self.reg_y);
+      },
+      Instruction::Implied { opcode: Opcode::TXA, .. } => {
+        self.transfer(self.reg_x, self.reg_a);
+      },
+      Instruction::Implied { opcode: Opcode::TYA, .. } => {
+        self.transfer(self.reg_y, self.reg_a);
       },
       Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
         let a = self.builder.build_load(self.reg_a, "a").into_int_value();
@@ -650,7 +691,15 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   fn decrement(&self, addr: IntValue<'ctx>) {
     let val = self.read_mem(addr);
     let val_new = self.builder.build_int_sub(val, self.context.i8_type().const_int(1, false), "val_new");
+    self.set_n_z(val_new);
     self.write_mem(addr, val_new);
+  }
+
+  fn decrement_reg(&self, reg: PointerValue) {
+    let val = self.builder.build_load(reg, "val").into_int_value();
+    let val_new = self.builder.build_int_sub(val, self.context.i8_type().const_int(1, false), "val_new");
+    self.set_n_z(val_new);
+    self.builder.build_store(reg, val_new);
   }
 
   fn eor(&self, arg: IntValue) {
@@ -663,7 +712,15 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   fn increment(&self, addr: IntValue<'ctx>) {
     let val = self.read_mem(addr);
     let val_new = self.builder.build_int_add(val, self.context.i8_type().const_int(1, false), "val_new");
+    self.set_n_z(val_new);
     self.write_mem(addr, val_new);
+  }
+
+  fn increment_reg(&self, reg: PointerValue) {
+    let val = self.builder.build_load(reg, "val").into_int_value();
+    let val_new = self.builder.build_int_add(val, self.context.i8_type().const_int(1, false), "val_new");
+    self.set_n_z(val_new);
+    self.builder.build_store(reg, val_new);
   }
 
   fn load(&self, reg: PointerValue, val: IntValue) {
@@ -747,6 +804,12 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   fn store(&self, reg: PointerValue, addr: IntValue) {
     let reg_val = self.builder.build_load(reg, "reg_val").into_int_value();
     self.write_mem(addr, reg_val);
+  }
+
+  fn transfer(&self, source: PointerValue, target: PointerValue) {
+    let val = self.builder.build_load(source, "val").into_int_value();
+    self.builder.build_store(target, val);
+    self.set_n_z(val);
   }
 
   fn write_mem(&self, addr: IntValue, val: IntValue) {
