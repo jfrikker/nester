@@ -3,7 +3,7 @@ use std::{path::PathBuf, fs::File, io::{Read, Write, BufWriter}, process::exit};
 use assembly::{nmi_address, irq_address};
 use clap::StructOpt;
 use clap_derive::{Parser, Subcommand};
-use inkwell::context::Context;
+use inkwell::{context::Context, passes::PassManager, module::Module};
 use llvm::Compiler;
 use mapper::Mapper0;
 use passes::{SelfLoopPass, SmbSwitchPass, BaseParser, Parser};
@@ -31,6 +31,9 @@ enum Command {
     output: PathBuf,
   },
   Llvm {
+    #[clap(short = 'O')]
+    optimize: bool,
+
     #[clap(name = "FILE", parse(from_os_str))]
     input: PathBuf,
 
@@ -44,7 +47,7 @@ fn main() {
 
   let res = match args.command {
     Command::Disassemble{input, output} => disassemble(input, output),
-    Command::Llvm{input, output} => llvm(input, output),
+    Command::Llvm{input, output, optimize} => llvm(input, output, optimize),
   };
 
   if let Err(e) = res {
@@ -76,7 +79,7 @@ fn disassemble(input: PathBuf, output: PathBuf) -> anyhow::Result<()> {
   Ok(())
 }
 
-fn llvm(input: PathBuf, output: PathBuf) -> anyhow::Result<()> {
+fn llvm(input: PathBuf, output: PathBuf, optimize: bool) -> anyhow::Result<()> {
   let mut buf = vec!();
   File::open(input)?.read_to_end(&mut buf)?;
   let (_, mapper) = Mapper0::read(&buf).map_err(|_| anyhow::anyhow!("Failed to read file"))?;
@@ -101,6 +104,21 @@ fn llvm(input: PathBuf, output: PathBuf) -> anyhow::Result<()> {
   compiler.define_entry("nmi", nmi_address(&prg_rom));
 
   module.verify().map_err(|s| anyhow::anyhow!("Resulting module is invalid: {}", s))?;
+
+  if optimize {
+    let pm = PassManager::create(&());
+    pm.add_promote_memory_to_register_pass(); // eliminate stack vars
+    pm.add_cfg_simplification_pass(); // Remove single-predecessor blocks
+    pm.add_bit_tracking_dce_pass(); // eliminate unused instructions
+    pm.add_dead_arg_elimination_pass(); // eliminate arguments we don't use
+    pm.add_argument_promotion_pass(); // Pointer arguments to values
+    pm.add_new_gvn_pass(); // some other dead code elimination thing?
+    pm.add_basic_alias_analysis_pass();
+    pm.add_dead_store_elimination_pass(); // eliminate unused stores
+    // pm.add_new_gvn_pass(); // eliminate unused stores
+    pm.run_on(&module);
+  }
+
   module.write_bitcode_to_path(&output);
   Ok(())
 }
