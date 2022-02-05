@@ -334,6 +334,12 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.load(self.reg_y, arg);
         self.incr_clk(4);
       },
+      Instruction::Absolute { opcode: Opcode::LSR, addr, .. } => {
+        let arg = self.absolute_value(*addr);
+        let res = self.lsr(arg);
+        self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
+        self.incr_clk(6);
+      },
       Instruction::Absolute { opcode: Opcode::ORA, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.ora(arg);
@@ -389,15 +395,89 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       },
       Instruction::AbsoluteX { opcode: Opcode::DEC, addr, .. } => {
         self.decrement(self.absolute_x_addr(*addr));
-        self.incr_clk(4);
       },
       Instruction::AbsoluteX { opcode: Opcode::EOR, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.eor(arg);
-        self.incr_clk(4);
       },
       Instruction::AbsoluteX { opcode: Opcode::INC, addr, .. } => {
         self.increment(self.absolute_x_addr(*addr));
+      },
+      Instruction::AbsoluteX { opcode: Opcode::LDA, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        self.load(self.reg_a, arg);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::LDY, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        self.load(self.reg_y, arg);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::LSR, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        let res = self.lsr(arg);
+        self.write_mem(self.absolute_x_addr(*addr), res);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::ORA, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        self.ora(arg);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::ROL, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        let res = self.rol(arg);
+        self.write_mem(self.absolute_x_addr(*addr), res);
+        self.incr_clk(6);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::ROR, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        let res = self.ror(arg);
+        self.write_mem(self.absolute_x_addr(*addr), res);
+        self.incr_clk(6);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::SBC, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        self.sbc(arg);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::STA, addr, .. } => {
+        self.store(self.reg_a, self.absolute_x_addr(*addr));
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::ADC, addr, .. } => {
+        let addr = self.absolute_y_value(*addr);
+        self.adc(addr);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::AND, addr, .. } => {
+        let addr = self.absolute_y_value(*addr);
+        self.and(addr);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::CMP, addr, .. } => {
+        let arg = self.absolute_y_value(*addr);
+        self.compare(self.reg_a, arg);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::EOR, addr, .. } => {
+        let arg = self.absolute_y_value(*addr);
+        self.eor(arg);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::LDA, addr, .. } => {
+        let arg = self.absolute_y_value(*addr);
+        self.load(self.reg_a, arg);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::LDX, addr, .. } => {
+        let arg = self.absolute_y_value(*addr);
+        self.load(self.reg_x, arg);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::ORA, addr, .. } => {
+        let arg = self.absolute_y_value(*addr);
+        self.ora(arg);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::SBC, addr, .. } => {
+        let arg = self.absolute_y_value(*addr);
+        self.sbc(arg);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteY { opcode: Opcode::STA, addr, .. } => {
+        self.store(self.reg_a, self.absolute_y_addr(*addr));
         self.incr_clk(4);
       },
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
@@ -433,6 +513,14 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       },
       Instruction::Immediate { opcode: Opcode::LDY, val, .. } => {
         self.load(self.reg_y, self.context.i8_type().const_int(*val as u64, false));
+      },
+      Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
+        let a = self.builder.build_load(self.reg_a, "a").into_int_value();
+        self.builder.build_switch(a, *self.blocks.get(targets.get(0).unwrap()).unwrap(),
+          &targets.iter()
+            .enumerate()
+            .map(|(i, tgt)| (self.context.i8_type().const_int(i as u64, false), *self.blocks.get(tgt).unwrap()))
+            .collect::<Vec<_>>());
       },
       _ => {}
     }
@@ -559,6 +647,14 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     self.set_n_z(val);
   }
 
+  fn lsr(&self, val: IntValue<'ctx>) -> IntValue<'ctx> {
+    let new_c = self.builder.build_int_truncate(val, self.context.bool_type(), "new_c");
+    self.builder.build_store(self.reg_c, new_c);
+    let new_val = self.builder.build_right_shift(val, self.context.i8_type().const_int(1, false), false, "new_val");
+    self.set_n_z(new_val);
+    new_val
+  }
+
   fn ora(&self, val: IntValue) {
     let a = self.builder.build_load(self.reg_a, "a").into_int_value();
     let new_a = self.builder.build_or(a, val, "new_a");
@@ -567,18 +663,18 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   }
 
   fn push(&self, val: IntValue) {
-    let s = self.builder.build_load(self.reg_s, "s").into_int_value();
+    /*let s = self.builder.build_load(self.reg_s, "s").into_int_value();
     let big_s = self.builder.build_int_z_extend(s, self.context.i16_type(), "big_s");
     let mem_loc = self.builder.build_int_add(big_s, self.context.i16_type().const_int(0x100, false), "mem_loc");
     self.write_mem(mem_loc, val);
     let new_s = self.builder.build_int_add(s, self.context.i8_type().const_int(1, false), "new_s");
-    self.builder.build_store(self.reg_s, new_s);
+    self.builder.build_store(self.reg_s, new_s);*/
   }
 
   fn pop(&self) {
-    let s = self.builder.build_load(self.reg_s, "s").into_int_value();
+    /*let s = self.builder.build_load(self.reg_s, "s").into_int_value();
     let new_s = self.builder.build_int_sub(s, self.context.i8_type().const_int(1, false), "new_s");
-    self.builder.build_store(self.reg_s, new_s);
+    self.builder.build_store(self.reg_s, new_s);*/
   }
 
   fn read_mem(&self, addr: IntValue<'ctx>) -> IntValue<'ctx> {
@@ -635,9 +731,9 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   }
 
   fn incr_clk(&self, cycles: u64) {
-    let clk = self.builder.build_load(self.reg_clk, "clk").into_int_value();
+    /*let clk = self.builder.build_load(self.reg_clk, "clk").into_int_value();
     let clk = self.builder.build_int_add(clk, self.context.i16_type().const_int(cycles, false), "newClk");
-    self.builder.build_store(self.reg_clk, clk);
+    self.builder.build_store(self.reg_clk, clk);*/
   }
 
   fn set_first_instruction(&self, addr: u16) {
@@ -653,5 +749,15 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
 
   fn absolute_x_value(&self, addr: u16) -> IntValue<'ctx> {
     self.read_mem(self.absolute_x_addr(addr))
+  }
+
+  fn absolute_y_addr(&self, addr: u16) -> IntValue<'ctx> {
+    let y = self.builder.build_load(self.reg_y, "y").into_int_value();
+    let y_ext = self.builder.build_int_z_extend(y, self.context.i16_type(), "y_ext");
+    self.builder.build_int_add(y_ext, self.context.i16_type().const_int(addr as u64, false), "addr")
+  }
+
+  fn absolute_y_value(&self, addr: u16) -> IntValue<'ctx> {
+    self.read_mem(self.absolute_y_addr(addr))
   }
 }
