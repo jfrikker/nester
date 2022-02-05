@@ -11,3 +11,7 @@ anyhow = "1.0.53"
 clap = "3.0.13"
 clap_derive = "3.0.12"
 nom = "7.1.0"
+
+[dependencies.inkwell]
+git = "https://github.com/TheDan64/inkwell"
+features = ["llvm11-0"]

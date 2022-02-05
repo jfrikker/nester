@@ -92,23 +92,23 @@ impl Parser for SmbSwitchPass {
   }
 
   fn post_process(&self, roots: &[u16], functions: &mut Functions) {
-      self.inner.post_process(roots, functions);
-      let flattened: Instructions = functions.iter()
-        .flat_map(|(_, insts)| insts.values())
-        .map(|inst| 
-          if let Instruction::Switch{loc, opcode, targets, ..} = inst {
-            let new_targets = targets.iter()
-              .cloned()
-              .take_while(|i| is_code(functions, *i))
-              .collect();
-              (*loc, Instruction::Switch{loc: *loc, opcode: *opcode, targets: new_targets})
-          } else {
-            (inst.offset(), inst.clone())
-          })
-        .collect();
-      let mut trimmed_funcs = function_bodies_with_parser(|addr| flattened.get(&addr).cloned().unwrap_or(Instruction::Unknown{loc: addr, opcode: 0}), roots);
-      self.inner.post_process(roots, &mut trimmed_funcs);
-      swap(functions, &mut trimmed_funcs);
+    self.inner.post_process(roots, functions);
+    let flattened: Instructions = functions.iter()
+      .flat_map(|(_, insts)| insts.values())
+      .map(|inst| 
+        if let Instruction::Switch{loc, opcode, targets, ..} = inst {
+          let new_targets = targets.iter()
+            .cloned()
+            .take_while(|i| is_code(functions, *i))
+            .collect();
+            (*loc, Instruction::Switch{loc: *loc, opcode: *opcode, targets: new_targets})
+        } else {
+          (inst.offset(), inst.clone())
+        })
+      .collect();
+    let mut trimmed_funcs = function_bodies_with_parser(|addr| flattened.get(&addr).cloned().unwrap_or(Instruction::Unknown{loc: addr, opcode: 0}), roots);
+    self.inner.post_process(roots, &mut trimmed_funcs);
+    swap(functions, &mut trimmed_funcs);
   }
 }
 
