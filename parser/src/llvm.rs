@@ -480,6 +480,30 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.store(self.reg_a, self.absolute_y_addr(*addr));
         self.incr_clk(4);
       },
+      Instruction::Accumulator { opcode: Opcode::ASL, .. } => {
+        let val = self.builder.build_load(self.reg_a, "a").into_int_value();
+        let val = self.asl(val);
+        self.builder.build_store(self.reg_a, val);
+        self.incr_clk(7);
+      },
+      Instruction::Accumulator { opcode: Opcode::LSR, .. } => {
+        let val = self.builder.build_load(self.reg_a, "a").into_int_value();
+        let val = self.lsr(val);
+        self.builder.build_store(self.reg_a, val);
+        self.incr_clk(7);
+      },
+      Instruction::Accumulator { opcode: Opcode::ROL, .. } => {
+        let val = self.builder.build_load(self.reg_a, "a").into_int_value();
+        let val = self.rol(val);
+        self.builder.build_store(self.reg_a, val);
+        self.incr_clk(7);
+      },
+      Instruction::Accumulator { opcode: Opcode::ROR, .. } => {
+        let val = self.builder.build_load(self.reg_a, "a").into_int_value();
+        let val = self.ror(val);
+        self.builder.build_store(self.reg_a, val);
+        self.incr_clk(7);
+      },
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
         self.pop();
         self.pop();
