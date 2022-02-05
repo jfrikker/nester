@@ -76,9 +76,8 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let i8_type = self.context.i8_type().into();
     let i1_type = self.context.bool_type().into();
     let i16_type = self.context.i16_type().into();
-    let ret_ty = function_return_type(self.context).ptr_type(AddressSpace::Generic).into();
-    let fn_type = self.context.void_type().fn_type(&[
-      ret_ty,
+    let ret_ty = function_return_type(self.context);
+    let fn_type = ret_ty.fn_type(&[
       i8_type, // A
       i8_type, // X
       i8_type, // Y
@@ -91,7 +90,7 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
       ], false);
     let func = self.module.add_function(&function_name(addr), fn_type, Some(Linkage::Private));
     let sret = self.context.create_enum_attribute(SRET, 0);
-    func.add_attribute(AttributeLoc::Param(0), sret);
+    // func.add_attribute(AttributeLoc::Param(0), sret);
   }
 
   pub fn define_func(&mut self, addr: u16, body: &BTreeMap<u16, Instruction>) {
@@ -114,13 +113,11 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let i8_zero = self.context.i8_type().const_zero();
     let i1_zero = self.context.bool_type().const_zero();
     let i16_zero = self.context.i16_type().const_zero();
-    let ret_ty = function_return_type(self.context);
     let function = self.module.add_function(name, fn_type, None);
     let entry = self.context.append_basic_block(function, "entry");
     self.builder.position_at_end(entry);
-    let ret = self.builder.build_alloca(ret_ty, "ret");
     let inner = self.module.get_function(&function_name(addr)).unwrap();
-    self.builder.build_call(inner, &[ret.into(), i8_zero.into(), i8_zero.into(), i8_zero.into(), i1_zero.into(),
+    self.builder.build_call(inner, &[i8_zero.into(), i8_zero.into(), i8_zero.into(), i1_zero.into(),
       i1_zero.into(), i1_zero.into(), i1_zero.into(), i8_zero.into(), i16_zero.into()], "res");
     self.builder.build_return(None);
   }
@@ -152,7 +149,6 @@ struct FunctionCompiler<'a, 'b, 'ctx> {
   reg_c: PointerValue<'ctx>,
   reg_s: PointerValue<'ctx>,
   reg_clk: PointerValue<'ctx>,
-  reg_ret: PointerValue<'ctx>,
 }
 
 impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
@@ -169,16 +165,15 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     let reg_c = compiler.builder.build_alloca(compiler.context.bool_type(), "regC");
     let reg_s = compiler.builder.build_alloca(compiler.context.i8_type(), "regS");
     let reg_clk = compiler.builder.build_alloca(compiler.context.i16_type(), "clk");
-    let reg_ret = compiler.builder.build_alloca(function_return_type(compiler.context), "ret");
-    compiler.builder.build_store(reg_a, function.get_nth_param(1).unwrap().into_int_value());
-    compiler.builder.build_store(reg_x, function.get_nth_param(2).unwrap().into_int_value());
-    compiler.builder.build_store(reg_y, function.get_nth_param(3).unwrap().into_int_value());
-    compiler.builder.build_store(reg_n, function.get_nth_param(4).unwrap().into_int_value());
-    compiler.builder.build_store(reg_z, function.get_nth_param(5).unwrap().into_int_value());
-    compiler.builder.build_store(reg_v, function.get_nth_param(6).unwrap().into_int_value());
-    compiler.builder.build_store(reg_c, function.get_nth_param(7).unwrap().into_int_value());
-    compiler.builder.build_store(reg_s, function.get_nth_param(8).unwrap().into_int_value());
-    compiler.builder.build_store(reg_clk, function.get_nth_param(9).unwrap().into_int_value());
+    compiler.builder.build_store(reg_a, function.get_nth_param(0).unwrap().into_int_value());
+    compiler.builder.build_store(reg_x, function.get_nth_param(1).unwrap().into_int_value());
+    compiler.builder.build_store(reg_y, function.get_nth_param(2).unwrap().into_int_value());
+    compiler.builder.build_store(reg_n, function.get_nth_param(3).unwrap().into_int_value());
+    compiler.builder.build_store(reg_z, function.get_nth_param(4).unwrap().into_int_value());
+    compiler.builder.build_store(reg_v, function.get_nth_param(5).unwrap().into_int_value());
+    compiler.builder.build_store(reg_c, function.get_nth_param(6).unwrap().into_int_value());
+    compiler.builder.build_store(reg_s, function.get_nth_param(7).unwrap().into_int_value());
+    compiler.builder.build_store(reg_clk, function.get_nth_param(8).unwrap().into_int_value());
 
     Self {
       compiler,
@@ -195,7 +190,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       reg_c,
       reg_s,
       reg_clk,
-      reg_ret,
     }
   }
 
@@ -213,7 +207,8 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       if let Some(following) = self.blocks.get(&inst.next_addr()) {
         self.builder.build_unconditional_branch(*following);
       } else {
-        self.builder.build_return(None);
+        let ret = function_return_type(self.context).const_zero();
+        self.builder.build_return(Some(&ret));
       }
     }
   }
@@ -288,26 +283,25 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let c = self.builder.build_load(self.reg_c, "c");
         let s = self.builder.build_load(self.reg_s, "s");
         let clk = self.builder.build_load(self.reg_clk, "clk");
-        let ret_ty = function_return_type(self.context);
         let function = self.compiler.module.get_function(&function_name(*addr)).unwrap();
-        self.builder.build_call(function, &[self.reg_ret.into(), a.into(), x.into(), y.into(), n.into(), z.into(), v.into(), c.into(), s.into(), clk.into()], "res");
-        let a = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 0, "new_a_ptr").unwrap(), "new_a");
+        let res = self.builder.build_call(function, &[a.into(), x.into(), y.into(), n.into(), z.into(), v.into(), c.into(), s.into(), clk.into()], "res").try_as_basic_value().unwrap_left().into_struct_value();
+        let a = self.builder.build_extract_value(res, 0, "new_a").unwrap();
         self.builder.build_store(self.reg_a, a);
-        let x = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 1, "new_x_ptr").unwrap(), "new_x");
+        let x = self.builder.build_extract_value(res, 1, "new_x").unwrap();
         self.builder.build_store(self.reg_x, x);
-        let y = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 2, "new_y_ptr").unwrap(), "new_y");
+        let y = self.builder.build_extract_value(res, 2, "new_y").unwrap();
         self.builder.build_store(self.reg_y, y);
-        let n = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 3, "new_n_ptr").unwrap(), "new_n");
+        let n = self.builder.build_extract_value(res, 3, "new_n").unwrap();
         self.builder.build_store(self.reg_n, n);
-        let z = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 4, "new_z_ptr").unwrap(), "new_z");
+        let z = self.builder.build_extract_value(res, 4, "new_z").unwrap();
         self.builder.build_store(self.reg_z, z);
-        let v = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 5, "new_v_ptr").unwrap(), "new_v");
+        let v = self.builder.build_extract_value(res, 5, "new_v").unwrap();
         self.builder.build_store(self.reg_v, v);
-        let c = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 6, "new_c_ptr").unwrap(), "new_c");
+        let c = self.builder.build_extract_value(res, 6, "new_c").unwrap();
         self.builder.build_store(self.reg_c, c);
-        let s = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 7, "new_s_ptr").unwrap(), "new_s");
+        let s = self.builder.build_extract_value(res, 7, "new_s").unwrap();
         self.builder.build_store(self.reg_s, s);
-        let clk = self.builder.build_load(self.builder.build_struct_gep(self.reg_ret, 8, "new_clk_ptr").unwrap(), "new_clk");
+        let clk = self.builder.build_extract_value(res, 8, "new_clk").unwrap();
         self.builder.build_store(self.reg_clk, clk);
       },
       Instruction::Absolute { opcode: Opcode::LDA, addr, .. } => {
@@ -328,25 +322,26 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
         self.pop();
         self.pop();
-        let ret = self.function.get_nth_param(0).unwrap().into_pointer_value();
+        let ret = function_return_type(self.context).const_zero();
         let a = self.builder.build_load(self.reg_a, "a");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 0, "a_ptr").unwrap(), a);
+        let ret = self.builder.build_insert_value(ret, a, 0, "ret").unwrap();
         let x = self.builder.build_load(self.reg_x, "x");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 1, "x_ptr").unwrap(), x);
+        let ret = self.builder.build_insert_value(ret, x, 1, "ret").unwrap();
         let y = self.builder.build_load(self.reg_y, "y");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 2, "y_ptr").unwrap(), y);
+        let ret = self.builder.build_insert_value(ret, y, 2, "ret").unwrap();
         let n = self.builder.build_load(self.reg_n, "n");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 3, "n_ptr").unwrap(), n);
+        let ret = self.builder.build_insert_value(ret, n, 3, "ret").unwrap();
         let z = self.builder.build_load(self.reg_z, "z");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 4, "z_ptr").unwrap(), z);
+        let ret = self.builder.build_insert_value(ret, z, 4, "ret").unwrap();
         let v = self.builder.build_load(self.reg_v, "v");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 5, "v_ptr").unwrap(), v);
+        let ret = self.builder.build_insert_value(ret, v, 5, "ret").unwrap();
         let c = self.builder.build_load(self.reg_c, "c");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 6, "c_ptr").unwrap(), c);
+        let ret = self.builder.build_insert_value(ret, c, 6, "ret").unwrap();
         let s = self.builder.build_load(self.reg_s, "s");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 7, "s_ptr").unwrap(), s);
+        let ret = self.builder.build_insert_value(ret, s, 7, "ret").unwrap();
         let clk = self.builder.build_load(self.reg_clk, "clk");
-        self.builder.build_store(self.builder.build_struct_gep(ret, 8, "clk_ptr").unwrap(), clk);
+        let ret = self.builder.build_insert_value(ret, clk, 8, "ret").unwrap();
+        self.builder.build_return(Some(&ret));
       },
       Instruction::Immediate { opcode: Opcode::LDA, val, .. } => {
         self.load(self.reg_a, self.context.i8_type().const_int(*val as u64, false));

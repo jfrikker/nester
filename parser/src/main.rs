@@ -111,8 +111,9 @@ fn llvm(input: PathBuf, output: PathBuf, optimize: bool) -> anyhow::Result<()> {
     pm.add_cfg_simplification_pass(); // Remove single-predecessor blocks
     pm.add_bit_tracking_dce_pass(); // eliminate unused instructions
     pm.add_dead_arg_elimination_pass(); // eliminate arguments we don't use
-    pm.add_bit_tracking_dce_pass(); // eliminate unused instructions
-    pm.add_dead_arg_elimination_pass(); // eliminate arguments we don't use
+    pm.add_instruction_combining_pass(); // eliminate redundant extract / inserts from previous pass
+    //pm.add_bit_tracking_dce_pass(); // eliminate unused instructions
+    //pm.add_dead_arg_elimination_pass(); // eliminate arguments we don't use
     //pm.add_new_gvn_pass(); // some other dead code elimination thing?
     //pm.add_dead_store_elimination_pass(); // eliminate unused stores
     // pm.add_new_gvn_pass(); // eliminate unused stores
