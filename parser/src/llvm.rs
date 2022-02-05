@@ -29,6 +29,8 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     result.add_write_mem_decl();
     result.add_uadd_carry_decl();
     result.add_sadd_carry_decl();
+    result.add_usub_carry_decl();
+    result.add_ssub_carry_decl();
     result
   }
 
@@ -70,6 +72,22 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let result_type = self.context.struct_type(&[i8_ty, i1_ty], false);
     let fn_type = result_type.fn_type(&[i8_ty.into(), i8_ty.into()], false);
     self.module.add_function("llvm.sadd.with.overflow.i8", fn_type, None);
+  }
+  
+  fn add_usub_carry_decl(&self) {
+    let i8_ty = self.context.i8_type().into();
+    let i1_ty = self.context.bool_type().into();
+    let result_type = self.context.struct_type(&[i8_ty, i1_ty], false);
+    let fn_type = result_type.fn_type(&[i8_ty.into(), i8_ty.into()], false);
+    self.module.add_function("llvm.usub.with.overflow.i8", fn_type, None);
+  }
+  
+  fn add_ssub_carry_decl(&self) {
+    let i8_ty = self.context.i8_type().into();
+    let i1_ty = self.context.bool_type().into();
+    let result_type = self.context.struct_type(&[i8_ty, i1_ty], false);
+    let fn_type = result_type.fn_type(&[i8_ty.into(), i8_ty.into()], false);
+    self.module.add_function("llvm.ssub.with.overflow.i8", fn_type, None);
   }
 
   pub fn declare_func(&mut self, addr: u16) {
@@ -319,6 +337,27 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.load(self.reg_y, arg);
         self.incr_clk(4);
       },
+      Instruction::Absolute { opcode: Opcode::ORA, addr, .. } => {
+        let arg = self.absolute_value(*addr).into_int_value();
+        self.ora(arg);
+      },
+      Instruction::Absolute { opcode: Opcode::ROL, addr, .. } => {
+        let arg = self.absolute_value(*addr).into_int_value();
+        let res = self.rol(arg);
+        self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
+        self.incr_clk(6);
+      },
+      Instruction::Absolute { opcode: Opcode::ROR, addr, .. } => {
+        let arg = self.absolute_value(*addr).into_int_value();
+        let res = self.ror(arg);
+        self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
+        self.incr_clk(6);
+      },
+      Instruction::Absolute { opcode: Opcode::SBC, addr, .. } => {
+        let arg = self.absolute_value(*addr).into_int_value();
+        let res = self.sbc(arg);
+        self.incr_clk(4);
+      },
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
         self.pop();
         self.pop();
@@ -404,6 +443,17 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     (res, c, v)
   }
 
+  fn sub_carry(&self, arg1: IntValue<'ctx>, arg2: IntValue<'ctx>) -> (IntValue<'ctx>, IntValue<'ctx>, IntValue<'ctx>) {
+    let usub = self.compiler.module.get_function("llvm.usub.with.overflow.i8").unwrap();
+    let ssub = self.compiler.module.get_function("llvm.ssub.with.overflow.i8").unwrap();
+    let res_u = self.compiler.builder.build_call(usub, &[arg1.into(), arg2.into()], "res_u").try_as_basic_value().unwrap_left().into_struct_value();
+    let res_s = self.compiler.builder.build_call(ssub, &[arg1.into(), arg2.into()], "res_s").try_as_basic_value().unwrap_left().into_struct_value();
+    let res = self.compiler.builder.build_extract_value(res_u, 0, "res").unwrap().into_int_value();
+    let c = self.compiler.builder.build_extract_value(res_u, 1, "c").unwrap().into_int_value();
+    let v = self.compiler.builder.build_extract_value(res_s, 1, "v").unwrap().into_int_value();
+    (res, c, v)
+  }
+
   fn and(&self, arg: IntValue) {
     let a = self.builder.build_load(self.reg_a, "a").into_int_value();
     let result = self.builder.build_and(arg, a, "res");
@@ -466,6 +516,13 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     self.set_n_z(val);
   }
 
+  fn ora(&self, val: IntValue) {
+    let a = self.builder.build_load(self.reg_a, "a").into_int_value();
+    let new_a = self.builder.build_or(a, val, "new_a");
+    self.builder.build_store(self.reg_a, new_a);
+    self.set_n_z(new_a);
+  }
+
   fn push(&self, val: IntValue) {
     let s = self.builder.build_load(self.reg_s, "s").into_int_value();
     let big_s = self.builder.build_int_z_extend(s, self.context.i16_type(), "big_s");
@@ -484,6 +541,44 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   fn read_mem(&self, addr: IntValue<'ctx>) -> IntValue<'ctx> {
     let read_mem = self.compiler.module.get_function("readMem").unwrap();
     self.builder.build_call(read_mem, &[addr.into()], "res").try_as_basic_value().unwrap_left().into_int_value()
+  }
+
+  fn rol(&self, val: IntValue<'ctx>) -> IntValue<'ctx> {
+    let c = self.builder.build_load(self.reg_c, "c").into_int_value();
+    let new_c1 = self.builder.build_right_shift(val, self.context.i8_type().const_int(7, false), false, "new_c1");
+    let new_c2 = self.builder.build_int_truncate(new_c1, self.context.bool_type(), "new_c2");
+    let c_ext = self.builder.build_int_s_extend(c, self.context.i8_type(), "c_ext");
+    let new_val1 = self.builder.build_left_shift(val, self.context.i8_type().const_int(1, false), "new_val1");
+    let new_val = self.builder.build_or(new_val1, c_ext, "new_val");
+    self.builder.build_store(self.reg_c, new_c2);
+    self.set_n_z(new_val);
+    new_val
+  }
+
+  fn ror(&self, val: IntValue<'ctx>) -> IntValue<'ctx> {
+    let c = self.builder.build_load(self.reg_c, "c").into_int_value();
+    let new_c = self.builder.build_int_truncate(val, self.context.bool_type(), "new_c");
+    let c_ext = self.builder.build_int_s_extend(c, self.context.i8_type(), "c_ext");
+    let c_ext2 = self.builder.build_and(c_ext, self.context.i8_type().const_int(0x80, false), "c_ext2");
+    let new_val1 = self.builder.build_right_shift(val, self.context.i8_type().const_int(1, false), false, "new_val1");
+    let new_val = self.builder.build_or(new_val1, c_ext2, "new_val");
+    self.builder.build_store(self.reg_c, new_c);
+    self.set_n_z(new_val);
+    new_val
+  }
+
+  fn sbc(&self, val: IntValue<'ctx>) {
+    let c = self.builder.build_load(self.reg_c, "c").into_int_value();
+    let c_ext = self.builder.build_int_z_extend(c, self.context.i8_type(), "c_ext");
+    let a = self.builder.build_load(self.reg_a, "a").into_int_value();
+    let (a2, c2, v2) = self.sub_carry(a, c_ext);
+    let (a3, c3, v3) = self.sub_carry(a2, val);
+    self.builder.build_store(self.reg_a, a3);
+    self.set_n_z(a3);
+    let c_new = self.builder.build_or(c2, c3, "c_new");
+    self.builder.build_store(self.reg_c, c_new);
+    let v_new = self.builder.build_or(v2, v3, "c_new");
+    self.builder.build_store(self.reg_v, v_new);
   }
 
   fn store(&self, reg: PointerValue, addr: IntValue) {
