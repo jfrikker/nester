@@ -234,37 +234,38 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   fn write_instruction(&self, inst: &Instruction) {
     match inst {
       Instruction::Absolute { opcode: Opcode::ADC, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.adc(arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::AND, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.and(arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::ASL, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
-        self.asl(arg);
+        let arg = self.absolute_value(*addr);
+        let val = self.asl(arg);
+        self.write_mem(self.context.i16_type().const_int(*addr as u64, false), val);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::BIT, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.bit(arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::CMP, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.compare(self.reg_a, arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::CPX, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.compare(self.reg_x, arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::CPY, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.compare(self.reg_y, arg);
         self.incr_clk(4);
       },
@@ -273,17 +274,13 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::EOR, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.eor(arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::INC, addr, .. } => {
         self.increment(self.context.i16_type().const_int(*addr as u64, false));
         self.incr_clk(4);
-      },
-      Instruction::Absolute { opcode: Opcode::STA, addr, .. } => {
-        self.store(self.reg_a, self.compiler.context.i16_type().const_int(*addr as u64, false));
-        self.incr_clk(6);
       },
       Instruction::Absolute { opcode: Opcode::JMP, addr, .. } => {
         self.builder.build_unconditional_branch(*self.blocks.get(addr).unwrap());
@@ -323,39 +320,84 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.builder.build_store(self.reg_clk, clk);
       },
       Instruction::Absolute { opcode: Opcode::LDA, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.load(self.reg_a, arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::LDX, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.load(self.reg_x, arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::LDY, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.load(self.reg_y, arg);
         self.incr_clk(4);
       },
       Instruction::Absolute { opcode: Opcode::ORA, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         self.ora(arg);
       },
       Instruction::Absolute { opcode: Opcode::ROL, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         let res = self.rol(arg);
         self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
         self.incr_clk(6);
       },
       Instruction::Absolute { opcode: Opcode::ROR, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
+        let arg = self.absolute_value(*addr);
         let res = self.ror(arg);
         self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
         self.incr_clk(6);
       },
       Instruction::Absolute { opcode: Opcode::SBC, addr, .. } => {
-        let arg = self.absolute_value(*addr).into_int_value();
-        let res = self.sbc(arg);
+        let arg = self.absolute_value(*addr);
+        self.sbc(arg);
+        self.incr_clk(4);
+      },
+      Instruction::Absolute { opcode: Opcode::STA, addr, .. } => {
+        self.store(self.reg_a, self.compiler.context.i16_type().const_int(*addr as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Absolute { opcode: Opcode::STX, addr, .. } => {
+        self.store(self.reg_x, self.compiler.context.i16_type().const_int(*addr as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::Absolute { opcode: Opcode::STY, addr, .. } => {
+        self.store(self.reg_y, self.compiler.context.i16_type().const_int(*addr as u64, false));
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::ADC, addr, .. } => {
+        let addr = self.absolute_x_value(*addr);
+        self.adc(addr);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::AND, addr, .. } => {
+        let addr = self.absolute_x_value(*addr);
+        self.and(addr);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::ASL, addr, .. } => {
+        let val = self.absolute_x_value(*addr);
+        let val = self.asl(val);
+        self.write_mem(self.absolute_x_addr(*addr), val);
+        self.incr_clk(7);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::CMP, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        self.compare(self.reg_a, arg);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::DEC, addr, .. } => {
+        self.decrement(self.absolute_x_addr(*addr));
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::EOR, addr, .. } => {
+        let arg = self.absolute_x_value(*addr);
+        self.eor(arg);
+        self.incr_clk(4);
+      },
+      Instruction::AbsoluteX { opcode: Opcode::INC, addr, .. } => {
+        self.increment(self.absolute_x_addr(*addr));
         self.incr_clk(4);
       },
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
@@ -396,11 +438,11 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     }
   }
 
-  fn absolute_value(&self, addr: u16) -> BasicValueEnum<'ctx> {
+  fn absolute_value(&self, addr: u16) -> IntValue<'ctx> {
     let read_mem = self.compiler.module.get_function("readMem").unwrap();
     self.builder.build_call(read_mem,
       &[self.context.i16_type().const_int(addr as u64, false).into()], "absVal")
-      .try_as_basic_value().unwrap_left()
+      .try_as_basic_value().unwrap_left().into_int_value()
   }
 
   fn set_n_z(&self, val: IntValue) {
@@ -461,12 +503,13 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     self.set_n_z(result);
   }
 
-  fn asl(&self, arg: IntValue) {
+  fn asl(&self, arg: IntValue<'ctx>) -> IntValue<'ctx> {
     let new_c1 = self.builder.build_right_shift(arg, self.context.i8_type().const_int(7, false), false, "new_c1");
     let new_c2 = self.builder.build_int_truncate(new_c1, self.context.bool_type(), "new_c2");
     let new_val = self.builder.build_left_shift(arg, self.context.i8_type().const_int(1, false), "new_val");
     self.builder.build_store(self.reg_c, new_c2);
     self.set_n_z(new_val);
+    new_val
   }
 
   fn bit(&self, arg: IntValue) {
@@ -600,5 +643,15 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   fn set_first_instruction(&self, addr: u16) {
     self.builder.position_at_end(self.function.get_first_basic_block().unwrap());
     self.builder.build_unconditional_branch(*self.blocks.get(&addr).unwrap());
+  }
+
+  fn absolute_x_addr(&self, addr: u16) -> IntValue<'ctx> {
+    let x = self.builder.build_load(self.reg_x, "x").into_int_value();
+    let x_ext = self.builder.build_int_z_extend(x, self.context.i16_type(), "x_ext");
+    self.builder.build_int_add(x_ext, self.context.i16_type().const_int(addr as u64, false), "addr")
+  }
+
+  fn absolute_x_value(&self, addr: u16) -> IntValue<'ctx> {
+    self.read_mem(self.absolute_x_addr(addr))
   }
 }
