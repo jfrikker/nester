@@ -31,6 +31,7 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     result.add_sadd_carry_decl();
     result.add_usub_carry_decl();
     result.add_ssub_carry_decl();
+    result.module.add_global(result.context.i8_type(), None, "sp");
     result
   }
 
@@ -544,6 +545,14 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       Instruction::Implied { opcode: Opcode::INY, .. } => {
         self.increment_reg(self.reg_y);
       }
+      Instruction::Implied { opcode: Opcode::PHA, .. } => {
+        let a = self.builder.build_load(self.reg_a, "a").into_int_value();
+        self.push(a);
+      }
+      Instruction::Implied { opcode: Opcode::PLA, .. } => {
+        let new_a = self.pop();
+        self.builder.build_store(self.reg_a, new_a);
+      }
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
         self.pop();
         self.pop();
@@ -665,6 +674,80 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let next = self.blocks[&inst.next_addr()];
         let branch = self.blocks[&inst.branch_addr().unwrap()];
         self.builder.build_conditional_branch(v, branch, next);
+      }
+      Instruction::Zeropage { opcode: Opcode::ADC, addr, .. } => {
+        let arg = self.zeropage_value(*addr);
+        self.adc(arg);
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::AND, addr, .. } => {
+        let arg = self.zeropage_value(*addr);
+        self.and(arg);
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::ASL, addr, .. } => {
+        let arg = self.zeropage_value(*addr);
+        let val = self.asl(arg);
+        self.write_mem(self.zeropage_addr(*addr), val);
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::BIT, addr, .. } => {
+        let arg = self.zeropage_value(*addr);
+        self.bit(arg);
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::CMP, addr, .. } => {
+        let arg = self.zeropage_value(*addr);
+        self.compare(self.reg_a, arg);
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::DEC, addr, .. } => {
+        self.decrement(self.zeropage_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::EOR, addr, .. } => {
+        self.eor(self.zeropage_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::INC, addr, .. } => {
+        self.increment(self.zeropage_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::LDA, addr, .. } => {
+        self.load(self.reg_a, self.zeropage_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::LDX, addr, .. } => {
+        self.load(self.reg_x, self.zeropage_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::LDY, addr, .. } => {
+        self.load(self.reg_y, self.zeropage_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::LSR, addr, .. } => {
+        let res = self.lsr(self.zeropage_value(*addr));
+        self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
+        self.incr_clk(6);
+      }
+      Instruction::Zeropage { opcode: Opcode::ORA, addr, .. } => {
+        self.ora(self.zeropage_value(*addr));
+      }
+      Instruction::Zeropage { opcode: Opcode::SBC, addr, .. } => {
+        self.sbc(self.zeropage_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::STA, addr, .. } => {
+        self.store(self.reg_a, self.zeropage_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::STX, addr, .. } => {
+        self.store(self.reg_x, self.zeropage_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::Zeropage { opcode: Opcode::STY, addr, .. } => {
+        self.store(self.reg_y, self.zeropage_addr(*addr));
+        self.incr_clk(4);
       }
       Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
         let a = self.builder.build_load(self.reg_a, "a").into_int_value();
@@ -831,18 +914,22 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   }
 
   fn push(&self, val: IntValue) {
-    /*let s = self.builder.build_load(self.reg_s, "s").into_int_value();
+    let reg_s = self.compiler.module.get_global("sp").unwrap().as_pointer_value();
+    let s = self.builder.build_load(reg_s, "s").into_int_value();
     let big_s = self.builder.build_int_z_extend(s, self.context.i16_type(), "big_s");
     let mem_loc = self.builder.build_int_add(big_s, self.context.i16_type().const_int(0x100, false), "mem_loc");
     self.write_mem(mem_loc, val);
     let new_s = self.builder.build_int_add(s, self.context.i8_type().const_int(1, false), "new_s");
-    self.builder.build_store(self.reg_s, new_s);*/
+    self.builder.build_store(reg_s, new_s);
   }
 
-  fn pop(&self) {
-    /*let s = self.builder.build_load(self.reg_s, "s").into_int_value();
+  fn pop(&self) -> IntValue {
+    let reg_s = self.compiler.module.get_global("sp").unwrap().as_pointer_value();
+    let s = self.builder.build_load(reg_s, "s").into_int_value();
     let new_s = self.builder.build_int_sub(s, self.context.i8_type().const_int(1, false), "new_s");
-    self.builder.build_store(self.reg_s, new_s);*/
+    let big_s = self.builder.build_int_z_extend(new_s, self.context.i16_type(), "big_s");
+    self.builder.build_store(reg_s, new_s);
+    self.read_mem(big_s)
   }
 
   fn read_mem(&self, addr: IntValue<'ctx>) -> IntValue<'ctx> {
@@ -967,7 +1054,25 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     self.builder.build_int_add(addr_base, y_ext, "addr")
   }
 
-  fn indirect_y_value(&self, offset:u8) -> IntValue<'ctx> {
+  fn indirect_y_value(&self, offset: u8) -> IntValue<'ctx> {
     self.read_mem(self.indirect_y_addr(offset))
+  }
+
+  fn zeropage_addr(&self, offset: u8) -> IntValue<'ctx> {
+    self.builder.build_int_z_extend(self.context.i8_type().const_int(offset as u64, false), self.context.i16_type(), "addr")
+  }
+
+  fn zeropage_value(&self, offset: u8) -> IntValue <'ctx> {
+    self.read_mem(self.zeropage_addr(offset))
+  }
+
+  fn zeropage_x_addr(&self, offset: u8) -> IntValue<'ctx> {
+    let x = self.builder.build_load(self.reg_x, "x").into_int_value();
+    let x_sum = self.builder.build_int_add(x, self.context.i8_type().const_int(offset as u64, false), "x_sum");
+    self.builder.build_int_z_extend(x_sum, self.context.i16_type(), "addr")
+  }
+
+  fn zeropage_x_value(&self, offset: u8) -> IntValue<'ctx> {
+    self.read_mem(self.zeropage_x_addr(offset))
   }
 }
