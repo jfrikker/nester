@@ -31,7 +31,9 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     result.add_sadd_carry_decl();
     result.add_usub_carry_decl();
     result.add_ssub_carry_decl();
-    result.module.add_global(result.context.i8_type(), None, "sp");
+    let sp = result.module.add_global(result.context.i8_type(), None, "sp");
+    sp.set_initializer(&result.context.i8_type().const_zero());
+    sp.set_linkage(Linkage::Private);
     result
   }
 
