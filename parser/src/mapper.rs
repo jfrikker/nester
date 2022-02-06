@@ -33,6 +33,12 @@ pub struct Mapper0PrgRom<'a> {
   prg_rom: &'a [u8],
 }
 
+impl <'a> Mapper0PrgRom<'a> {
+  pub fn as_bytes(&self) -> &[u8] {
+    self.prg_rom
+  }
+}
+
 impl <'a> Index<u16> for Mapper0PrgRom<'a> {
   type Output = u8;
 

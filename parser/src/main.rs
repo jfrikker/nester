@@ -92,6 +92,7 @@ fn llvm(input: PathBuf, output: PathBuf, optimize: bool) -> anyhow::Result<()> {
   let module = context.create_module("nes");
   let mut compiler = Compiler::new(&context, &module);
 
+  compiler.set_prg_rom(prg_rom.as_bytes());
   for addr in functions.keys() {
     compiler.declare_func(*addr);
   }
@@ -125,6 +126,7 @@ fn llvm(input: PathBuf, output: PathBuf, optimize: bool) -> anyhow::Result<()> {
     pm.add_global_dce_pass();
     pm.add_cfg_simplification_pass(); 
     pm.add_instruction_combining_pass(); // eliminate redundant extract / inserts from previous pass
+    pm.add_cfg_simplification_pass(); 
     pm.add_bit_tracking_dce_pass(); // eliminate unused instructions
     pm.run_on(&module);
   }
