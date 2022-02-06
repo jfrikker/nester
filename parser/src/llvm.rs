@@ -579,6 +579,45 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       Instruction::Implied { opcode: Opcode::TYA, .. } => {
         self.transfer(self.reg_y, self.reg_a);
       },
+      Instruction::IndirectX { opcode: Opcode::ADC, offset, .. } => {
+        self.adc(self.indirect_x_value(*offset));
+      },
+      Instruction::IndirectX { opcode: Opcode::AND, offset, .. } => {
+        self.and(self.indirect_x_value(*offset));
+      },
+      Instruction::IndirectX { opcode: Opcode::EOR, offset, .. } => {
+        self.eor(self.indirect_x_value(*offset));
+      },
+      Instruction::IndirectX { opcode: Opcode::LDA, offset, .. } => {
+        self.load(self.reg_a, self.indirect_x_value(*offset));
+      },
+      Instruction::IndirectX { opcode: Opcode::ORA, offset, .. } => {
+        self.ora(self.indirect_x_value(*offset));
+      },
+      Instruction::IndirectX { opcode: Opcode::SBC, offset, .. } => {
+        self.sbc(self.indirect_x_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::ADC, offset, .. } => {
+        self.adc(self.indirect_y_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::AND, offset, .. } => {
+        self.and(self.indirect_y_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::EOR, offset, .. } => {
+        self.eor(self.indirect_y_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::LDA, offset, .. } => {
+        self.load(self.reg_a, self.indirect_y_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::ORA, offset, .. } => {
+        self.ora(self.indirect_y_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::SBC, offset, .. } => {
+        self.sbc(self.indirect_y_value(*offset));
+      },
+      Instruction::IndirectY { opcode: Opcode::STA, offset, .. } => {
+        self.store(self.reg_a, self.indirect_y_addr(*offset));
+      },
       Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
         let a = self.builder.build_load(self.reg_a, "a").into_int_value();
         self.builder.build_switch(a, *self.blocks.get(targets.get(0).unwrap()).unwrap(),
@@ -846,5 +885,41 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
 
   fn absolute_y_value(&self, addr: u16) -> IntValue<'ctx> {
     self.read_mem(self.absolute_y_addr(addr))
+  }
+
+  fn concat(&self, low: IntValue<'ctx>, high: IntValue<'ctx>) -> IntValue<'ctx> {
+    let low_ext = self.builder.build_int_z_extend(low, self.context.i16_type(), "low_ext");
+    let high_ext = self.builder.build_int_z_extend(high, self.context.i16_type(), "high_ext");
+    let high_shift = self.builder.build_left_shift(high_ext, self.context.i16_type().const_int(8, false), "high_shift");
+    self.builder.build_and(low_ext, high_shift, "concat")
+  }
+
+  fn indirect_x_addr(&self, offset: u8) -> IntValue<'ctx> {
+    let x = self.builder.build_load(self.reg_x, "x").into_int_value();
+    let addr_src = self.builder.build_int_add(x, self.context.i8_type().const_int(offset as u64, false), "addr_src");
+    let addr_low = self.builder.build_int_z_extend(addr_src, self.context.i16_type(), "addr_low");
+    let low = self.read_mem(addr_low);
+    let addr_high = self.builder.build_int_add(addr_low, self.context.i16_type().const_int(1, false), "addr_high");
+    let high = self.read_mem(addr_high);
+    self.concat(low, high)
+  }
+
+  fn indirect_x_value(&self, offset: u8) -> IntValue<'ctx> {
+    self.read_mem(self.indirect_x_addr(offset))
+  }
+
+  fn indirect_y_addr(&self, offset: u8) -> IntValue<'ctx> {
+    let addr_low = self.context.i16_type().const_int(offset as u64, false);
+    let low = self.read_mem(addr_low);
+    let addr_high = self.builder.build_int_add(addr_low, self.context.i16_type().const_int(1, false), "addr_high");
+    let high = self.read_mem(addr_high);
+    let addr_base = self.concat(low, high);
+    let y = self.builder.build_load(self.reg_y, "y").into_int_value();
+    let y_ext = self.builder.build_int_z_extend(y, self.context.i16_type(), "y_ext");
+    self.builder.build_int_add(addr_base, y_ext, "addr")
+  }
+
+  fn indirect_y_value(&self, offset:u8) -> IntValue<'ctx> {
+    self.read_mem(self.indirect_y_addr(offset))
   }
 }
