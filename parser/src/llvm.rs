@@ -42,7 +42,7 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let inaccessible_mem_only = self.context.create_enum_attribute(INACCESSIBLE_MEM_ONLY, 0);
     let no_unwind = self.context.create_enum_attribute(NO_UNWIND, 0);
     let will_return = self.context.create_enum_attribute(WILL_RETURN, 0);
-    result.add_attribute(AttributeLoc::Function, read_only);
+    // result.add_attribute(AttributeLoc::Function, read_only);
     result.add_attribute(AttributeLoc::Function, inaccessible_mem_only);
     result.add_attribute(AttributeLoc::Function, no_unwind);
     result.add_attribute(AttributeLoc::Function, will_return);
@@ -675,6 +675,14 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let branch = self.blocks[&inst.branch_addr().unwrap()];
         self.builder.build_conditional_branch(v, branch, next);
       }
+      Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
+        let a = self.builder.build_load(self.reg_a, "a").into_int_value();
+        self.builder.build_switch(a, *self.blocks.get(targets.get(0).unwrap()).unwrap(),
+          &targets.iter()
+            .enumerate()
+            .map(|(i, tgt)| (self.context.i8_type().const_int(i as u64, false), *self.blocks.get(tgt).unwrap()))
+            .collect::<Vec<_>>());
+      }
       Instruction::Zeropage { opcode: Opcode::ADC, addr, .. } => {
         let arg = self.zeropage_value(*addr);
         self.adc(arg);
@@ -727,7 +735,7 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       }
       Instruction::Zeropage { opcode: Opcode::LSR, addr, .. } => {
         let res = self.lsr(self.zeropage_value(*addr));
-        self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
+        self.write_mem(self.zeropage_addr(*addr), res);
         self.incr_clk(6);
       }
       Instruction::Zeropage { opcode: Opcode::ORA, addr, .. } => {
@@ -749,14 +757,63 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.store(self.reg_y, self.zeropage_addr(*addr));
         self.incr_clk(4);
       }
-      Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
-        let a = self.builder.build_load(self.reg_a, "a").into_int_value();
-        self.builder.build_switch(a, *self.blocks.get(targets.get(0).unwrap()).unwrap(),
-          &targets.iter()
-            .enumerate()
-            .map(|(i, tgt)| (self.context.i8_type().const_int(i as u64, false), *self.blocks.get(tgt).unwrap()))
-            .collect::<Vec<_>>());
-      },
+      Instruction::ZeropageX { opcode: Opcode::ADC, addr, .. } => {
+        self.adc(self.zeropage_x_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::AND, addr, .. } => {
+        self.and(self.zeropage_x_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::ASL, addr, .. } => {
+        let val = self.asl(self.zeropage_x_value(*addr));
+        self.write_mem(self.zeropage_x_addr(*addr), val);
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::DEC, addr, .. } => {
+        self.decrement(self.zeropage_x_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::EOR, addr, .. } => {
+        self.eor(self.zeropage_x_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::INC, addr, .. } => {
+        self.increment(self.zeropage_x_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::LDA, addr, .. } => {
+        self.load(self.reg_a, self.zeropage_x_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::LDY, addr, .. } => {
+        self.load(self.reg_y, self.zeropage_x_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::LSR, addr, .. } => {
+        let res = self.lsr(self.zeropage_x_value(*addr));
+        self.write_mem(self.zeropage_addr(*addr), res);
+        self.incr_clk(6);
+      }
+      Instruction::ZeropageX { opcode: Opcode::ORA, addr, .. } => {
+        self.ora(self.zeropage_x_value(*addr));
+      }
+      Instruction::ZeropageX { opcode: Opcode::SBC, addr, .. } => {
+        self.sbc(self.zeropage_x_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageX { opcode: Opcode::STA, addr, .. } => {
+        self.store(self.reg_a, self.zeropage_x_addr(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageY { opcode: Opcode::LDX, addr, .. } => {
+        self.load(self.reg_x, self.zeropage_y_value(*addr));
+        self.incr_clk(4);
+      }
+      Instruction::ZeropageY { opcode: Opcode::STX, addr, .. } => {
+        self.store(self.reg_x, self.zeropage_y_addr(*addr));
+        self.incr_clk(4);
+      }
       _ => {}
     }
   }
@@ -1026,7 +1083,7 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     let low_ext = self.builder.build_int_z_extend(low, self.context.i16_type(), "low_ext");
     let high_ext = self.builder.build_int_z_extend(high, self.context.i16_type(), "high_ext");
     let high_shift = self.builder.build_left_shift(high_ext, self.context.i16_type().const_int(8, false), "high_shift");
-    self.builder.build_and(low_ext, high_shift, "concat")
+    self.builder.build_or(low_ext, high_shift, "concat")
   }
 
   fn indirect_x_addr(&self, offset: u8) -> IntValue<'ctx> {
@@ -1074,5 +1131,15 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
 
   fn zeropage_x_value(&self, offset: u8) -> IntValue<'ctx> {
     self.read_mem(self.zeropage_x_addr(offset))
+  }
+
+  fn zeropage_y_addr(&self, offset: u8) -> IntValue<'ctx> {
+    let y = self.builder.build_load(self.reg_y, "y").into_int_value();
+    let y_sum = self.builder.build_int_add(y, self.context.i8_type().const_int(offset as u64, false), "y_sum");
+    self.builder.build_int_z_extend(y_sum, self.context.i16_type(), "addr")
+  }
+
+  fn zeropage_y_value(&self, offset: u8) -> IntValue<'ctx> {
+    self.read_mem(self.zeropage_y_addr(offset))
   }
 }
