@@ -223,54 +223,54 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let arg = self.absolute_value(*addr);
         self.adc(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::AND, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.and(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::ASL, addr, .. } => {
         let arg = self.absolute_value(*addr);
         let val = self.asl(arg);
         self.write_mem(self.context.i16_type().const_int(*addr as u64, false), val);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::BIT, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.bit(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::CMP, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.compare(self.reg_a, arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::CPX, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.compare(self.reg_x, arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::CPY, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.compare(self.reg_y, arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::DEC, addr, .. } => {
         self.decrement(self.context.i16_type().const_int(*addr as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::EOR, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.eor(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::INC, addr, .. } => {
         self.increment(self.context.i16_type().const_int(*addr as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::JMP, addr, .. } => {
         self.builder.build_unconditional_branch(*self.blocks.get(addr).unwrap());
-      },
+      }
       Instruction::Absolute { loc, opcode: Opcode::JSR, addr, ..} => {
         self.incr_clk(6);
         self.push(self.context.i8_type().const_int((*loc & 0xFF) as u64, false));
@@ -298,252 +298,252 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.builder.build_store(self.reg_v, v);
         let c = self.builder.build_extract_value(res, 6, "new_c").unwrap();
         self.builder.build_store(self.reg_c, c);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::LDA, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.load(self.reg_a, arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::LDX, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.load(self.reg_x, arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::LDY, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.load(self.reg_y, arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::LSR, addr, .. } => {
         let arg = self.absolute_value(*addr);
         let res = self.lsr(arg);
         self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
         self.incr_clk(6);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::ORA, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.ora(arg);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::ROL, addr, .. } => {
         let arg = self.absolute_value(*addr);
         let res = self.rol(arg);
         self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
         self.incr_clk(6);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::ROR, addr, .. } => {
         let arg = self.absolute_value(*addr);
         let res = self.ror(arg);
         self.write_mem(self.context.i16_type().const_int(*addr as u64, false), res);
         self.incr_clk(6);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::SBC, addr, .. } => {
         let arg = self.absolute_value(*addr);
         self.sbc(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::STA, addr, .. } => {
         self.store(self.reg_a, self.compiler.context.i16_type().const_int(*addr as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::STX, addr, .. } => {
         self.store(self.reg_x, self.compiler.context.i16_type().const_int(*addr as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Absolute { opcode: Opcode::STY, addr, .. } => {
         self.store(self.reg_y, self.compiler.context.i16_type().const_int(*addr as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::ADC, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.adc(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::AND, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.and(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::ASL, addr, .. } => {
         let val = self.absolute_x_value(*addr);
         let val = self.asl(val);
         self.write_mem(self.absolute_x_addr(*addr), val);
         self.incr_clk(7);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::CMP, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.compare(self.reg_a, arg);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::DEC, addr, .. } => {
         self.decrement(self.absolute_x_addr(*addr));
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::EOR, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.eor(arg);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::INC, addr, .. } => {
         self.increment(self.absolute_x_addr(*addr));
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::LDA, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.load(self.reg_a, arg);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::LDY, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.load(self.reg_y, arg);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::LSR, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         let res = self.lsr(arg);
         self.write_mem(self.absolute_x_addr(*addr), res);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::ORA, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.ora(arg);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::ROL, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         let res = self.rol(arg);
         self.write_mem(self.absolute_x_addr(*addr), res);
         self.incr_clk(6);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::ROR, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         let res = self.ror(arg);
         self.write_mem(self.absolute_x_addr(*addr), res);
         self.incr_clk(6);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::SBC, addr, .. } => {
         let arg = self.absolute_x_value(*addr);
         self.sbc(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteX { opcode: Opcode::STA, addr, .. } => {
         self.store(self.reg_a, self.absolute_x_addr(*addr));
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::ADC, addr, .. } => {
         let addr = self.absolute_y_value(*addr);
         self.adc(addr);
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::AND, addr, .. } => {
         let addr = self.absolute_y_value(*addr);
         self.and(addr);
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::CMP, addr, .. } => {
         let arg = self.absolute_y_value(*addr);
         self.compare(self.reg_a, arg);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::EOR, addr, .. } => {
         let arg = self.absolute_y_value(*addr);
         self.eor(arg);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::LDA, addr, .. } => {
         let arg = self.absolute_y_value(*addr);
         self.load(self.reg_a, arg);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::LDX, addr, .. } => {
         let arg = self.absolute_y_value(*addr);
         self.load(self.reg_x, arg);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::ORA, addr, .. } => {
         let arg = self.absolute_y_value(*addr);
         self.ora(arg);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::SBC, addr, .. } => {
         let arg = self.absolute_y_value(*addr);
         self.sbc(arg);
         self.incr_clk(4);
-      },
+      }
       Instruction::AbsoluteY { opcode: Opcode::STA, addr, .. } => {
         self.store(self.reg_a, self.absolute_y_addr(*addr));
         self.incr_clk(4);
-      },
+      }
       Instruction::Accumulator { opcode: Opcode::ASL, .. } => {
         let val = self.builder.build_load(self.reg_a, "a").into_int_value();
         let val = self.asl(val);
         self.builder.build_store(self.reg_a, val);
         self.incr_clk(7);
-      },
+      }
       Instruction::Accumulator { opcode: Opcode::LSR, .. } => {
         let val = self.builder.build_load(self.reg_a, "a").into_int_value();
         let val = self.lsr(val);
         self.builder.build_store(self.reg_a, val);
         self.incr_clk(7);
-      },
+      }
       Instruction::Accumulator { opcode: Opcode::ROL, .. } => {
         let val = self.builder.build_load(self.reg_a, "a").into_int_value();
         let val = self.rol(val);
         self.builder.build_store(self.reg_a, val);
         self.incr_clk(7);
-      },
+      }
       Instruction::Accumulator { opcode: Opcode::ROR, .. } => {
         let val = self.builder.build_load(self.reg_a, "a").into_int_value();
         let val = self.ror(val);
         self.builder.build_store(self.reg_a, val);
         self.incr_clk(7);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::ADC, val, .. } => {
         self.adc(self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::AND, val, .. } => {
         self.and(self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::CMP, val, .. } => {
         self.compare(self.reg_a, self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::CPX, val, .. } => {
         self.compare(self.reg_x, self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::CPY, val, .. } => {
         self.compare(self.reg_y, self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::EOR, val, .. } => {
         self.eor(self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::LDA, val, .. } => {
         self.load(self.reg_a, self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(2);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::LDX, val, .. } => {
         self.load(self.reg_x, self.context.i8_type().const_int(*val as u64, false));
-      },
+      }
       Instruction::Immediate { opcode: Opcode::LDY, val, .. } => {
         self.load(self.reg_y, self.context.i8_type().const_int(*val as u64, false));
-      },
+      }
       Instruction::Immediate { opcode: Opcode::ORA, val, .. } => {
         self.ora(self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Immediate { opcode: Opcode::SBC, val, .. } => {
         self.sbc(self.context.i8_type().const_int(*val as u64, false));
         self.incr_clk(4);
-      },
+      }
       Instruction::Implied { opcode: Opcode::CLC, .. } => {
         self.builder.build_store(self.reg_c, self.context.bool_type().const_zero());
-      },
+      }
       Instruction::Implied { opcode: Opcode::CLV, .. } => {
         self.builder.build_store(self.reg_v, self.context.bool_type().const_zero());
-      },
+      }
       Instruction::Implied { opcode: Opcode::DEX, .. } => {
         self.decrement_reg(self.reg_x);
-      },
+      }
       Instruction::Implied { opcode: Opcode::DEY, .. } => {
         self.decrement_reg(self.reg_y);
-      },
+      }
       Instruction::Implied { opcode: Opcode::INX, .. } => {
         self.increment_reg(self.reg_x);
-      },
+      }
       Instruction::Implied { opcode: Opcode::INY, .. } => {
         self.increment_reg(self.reg_y);
-      },
+      }
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
         self.pop();
         self.pop();
@@ -563,61 +563,109 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         let c = self.builder.build_load(self.reg_c, "c");
         let ret = self.builder.build_insert_value(ret, c, 6, "ret").unwrap();
         self.builder.build_return(Some(&ret));
-      },
+      }
       Instruction::Implied { opcode: Opcode::SEC, .. } => {
         self.builder.build_store(self.reg_c, self.context.bool_type().const_all_ones());
-      },
+      }
       Instruction::Implied { opcode: Opcode::TAX, .. } => {
         self.transfer(self.reg_a, self.reg_x);
-      },
+      }
       Instruction::Implied { opcode: Opcode::TAY, .. } => {
         self.transfer(self.reg_a, self.reg_y);
-      },
+      }
       Instruction::Implied { opcode: Opcode::TXA, .. } => {
         self.transfer(self.reg_x, self.reg_a);
-      },
+      }
       Instruction::Implied { opcode: Opcode::TYA, .. } => {
         self.transfer(self.reg_y, self.reg_a);
-      },
+      }
       Instruction::IndirectX { opcode: Opcode::ADC, offset, .. } => {
         self.adc(self.indirect_x_value(*offset));
-      },
+      }
       Instruction::IndirectX { opcode: Opcode::AND, offset, .. } => {
         self.and(self.indirect_x_value(*offset));
-      },
+      }
       Instruction::IndirectX { opcode: Opcode::EOR, offset, .. } => {
         self.eor(self.indirect_x_value(*offset));
-      },
+      }
       Instruction::IndirectX { opcode: Opcode::LDA, offset, .. } => {
         self.load(self.reg_a, self.indirect_x_value(*offset));
-      },
+      }
       Instruction::IndirectX { opcode: Opcode::ORA, offset, .. } => {
         self.ora(self.indirect_x_value(*offset));
-      },
+      }
       Instruction::IndirectX { opcode: Opcode::SBC, offset, .. } => {
         self.sbc(self.indirect_x_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::ADC, offset, .. } => {
         self.adc(self.indirect_y_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::AND, offset, .. } => {
         self.and(self.indirect_y_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::EOR, offset, .. } => {
         self.eor(self.indirect_y_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::LDA, offset, .. } => {
         self.load(self.reg_a, self.indirect_y_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::ORA, offset, .. } => {
         self.ora(self.indirect_y_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::SBC, offset, .. } => {
         self.sbc(self.indirect_y_value(*offset));
-      },
+      }
       Instruction::IndirectY { opcode: Opcode::STA, offset, .. } => {
         self.store(self.reg_a, self.indirect_y_addr(*offset));
-      },
+      }
+      inst@Instruction::Relative { opcode: Opcode::BCC, .. } => {
+        let c = self.builder.build_load(self.reg_c, "c").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(c, next, branch);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BCS, .. } => {
+        let c = self.builder.build_load(self.reg_c, "c").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(c, branch, next);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BEQ, .. } => {
+        let z = self.builder.build_load(self.reg_z, "z").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(z, branch, next);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BMI, .. } => {
+        let n = self.builder.build_load(self.reg_n, "n").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(n, branch, next);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BNE, .. } => {
+        let z = self.builder.build_load(self.reg_z, "z").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(z, next, branch);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BPL, .. } => {
+        let n = self.builder.build_load(self.reg_n, "n").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(n, next, branch);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BVC, .. } => {
+        let v = self.builder.build_load(self.reg_v, "v").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(v, next, branch);
+      }
+      inst@Instruction::Relative { opcode: Opcode::BVS, .. } => {
+        let v = self.builder.build_load(self.reg_v, "v").into_int_value();
+        let next = self.blocks[&inst.next_addr()];
+        let branch = self.blocks[&inst.branch_addr().unwrap()];
+        self.builder.build_conditional_branch(v, branch, next);
+      }
       Instruction::Switch { opcode: Opcode::SWA, targets, .. } => {
         let a = self.builder.build_load(self.reg_a, "a").into_int_value();
         self.builder.build_switch(a, *self.blocks.get(targets.get(0).unwrap()).unwrap(),

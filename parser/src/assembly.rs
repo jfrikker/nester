@@ -446,6 +446,13 @@ impl Instruction {
     self.offset() + self.bin_length()
   }
 
+  pub fn branch_addr(&self) -> Option<u16> {
+    match self {
+      Instruction::Relative{loc, offset, ..} => Some(((*loc as i32) + 2 + (*offset as i32)) as u16),
+      _ => None
+    }
+  }
+
   pub fn following_addrs(&self) -> Vec<u16> {
     match self {
       Instruction::Absolute{opcode: Opcode::JMP, addr, ..} => vec!(*addr),
