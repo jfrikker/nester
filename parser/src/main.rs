@@ -10,6 +10,7 @@ use passes::{SelfLoopPass, SmbSwitchPass, BaseParser, Parser};
 
 use crate::assembly::reset_address;
 
+mod apple;
 mod assembly;
 mod llvm;
 mod mapper;
@@ -114,6 +115,7 @@ fn llvm(input: PathBuf, output: PathBuf, optimize: bool) -> anyhow::Result<()> {
     pm.add_dead_arg_elimination_pass(); // eliminate arguments we don't use
     pm.add_reassociate_pass();
     pm.add_instruction_combining_pass(); // eliminate redundant extract / inserts from previous pass
+    pm.add_scalar_repl_aggregates_pass_ssa();
     pm.add_dead_store_elimination_pass();
     pm.add_loop_idiom_pass();
     pm.add_loop_rotate_pass();
