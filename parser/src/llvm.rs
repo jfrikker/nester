@@ -62,6 +62,8 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let else_low = self.context.append_basic_block(read_mem, "else_low");
     let if_external = self.context.append_basic_block(read_mem, "if_external");
     let else_external = self.context.append_basic_block(read_mem, "else_external");
+    let if_high = self.context.append_basic_block(read_mem, "if_high");
+    let else_high = self.context.append_basic_block(read_mem, "else_high");
 
     let addr = read_mem.get_nth_param(0).unwrap().into_int_value();
     self.builder.position_at_end(entry);
@@ -85,9 +87,21 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     self.builder.build_return(Some(&val));
 
     self.builder.position_at_end(else_external);
+    let cond = self.builder.build_int_compare(IntPredicate::ULT, addr, i16_ty.const_int(0x8000, false), "cond");
+    self.builder.build_conditional_branch(cond, if_high, else_high);
+
+    self.builder.position_at_end(if_high);
     let addr2 = self.builder.build_int_sub(addr, i16_ty.const_int(0x4000, false), "addr");
     let ptr = unsafe {
       self.builder.build_gep(self.module.get_global("highMem").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
+    };
+    let val = self.builder.build_load(ptr, "val");
+    self.builder.build_return(Some(&val));
+
+    self.builder.position_at_end(else_high);
+    let addr2 = self.builder.build_int_sub(addr, i16_ty.const_int(0x8000, false), "addr");
+    let ptr = unsafe {
+      self.builder.build_gep(self.module.get_global("prgRom").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
     };
     let val = self.builder.build_load(ptr, "val");
     self.builder.build_return(Some(&val));
@@ -260,6 +274,8 @@ struct FunctionCompiler<'a, 'b, 'ctx> {
   reg_z: PointerValue<'ctx>,
   reg_v: PointerValue<'ctx>,
   reg_c: PointerValue<'ctx>,
+  stack: PointerValue<'ctx>,
+  sp: PointerValue<'ctx>,
 }
 
 impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
@@ -274,6 +290,8 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     let reg_z = compiler.builder.build_alloca(compiler.context.bool_type(), "regZ");
     let reg_v = compiler.builder.build_alloca(compiler.context.bool_type(), "regV");
     let reg_c = compiler.builder.build_alloca(compiler.context.bool_type(), "regC");
+    let stack = compiler.builder.build_alloca(compiler.context.i8_type().array_type(10), "stack");
+    let sp = compiler.builder.build_alloca(compiler.context.i8_type(), "sp");
     compiler.builder.build_store(reg_a, function.get_nth_param(0).unwrap().into_int_value());
     compiler.builder.build_store(reg_x, function.get_nth_param(1).unwrap().into_int_value());
     compiler.builder.build_store(reg_y, function.get_nth_param(2).unwrap().into_int_value());
@@ -281,6 +299,7 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     compiler.builder.build_store(reg_z, function.get_nth_param(4).unwrap().into_int_value());
     compiler.builder.build_store(reg_v, function.get_nth_param(5).unwrap().into_int_value());
     compiler.builder.build_store(reg_c, function.get_nth_param(6).unwrap().into_int_value());
+    compiler.builder.build_store(sp, compiler.context.i8_type().const_zero());
 
     Self {
       compiler,
@@ -295,6 +314,8 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       reg_z,
       reg_v,
       reg_c,
+      stack,
+      sp,
     }
   }
 
@@ -374,8 +395,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
       }
       Instruction::Absolute { loc, opcode: Opcode::JSR, addr, ..} => {
         self.incr_clk(6);
-        self.push(self.context.i8_type().const_int((*loc & 0xFF) as u64, false));
-        self.push(self.context.i8_type().const_int(((*loc >> 8) & 0xFF) as u64, false));
         let a = self.builder.build_load(self.reg_a, "a");
         let x = self.builder.build_load(self.reg_x, "x");
         let y = self.builder.build_load(self.reg_y, "y");
@@ -654,8 +673,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         self.builder.build_store(self.reg_a, new_a);
       }
       Instruction::Implied { opcode: Opcode::RTS, .. } => {
-        self.pop();
-        self.pop();
         let ret = function_return_type(self.context).const_zero();
         let a = self.builder.build_load(self.reg_a, "a");
         let ret = self.builder.build_insert_value(ret, a, 0, "ret").unwrap();
@@ -1071,22 +1088,23 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
   }
 
   fn push(&self, val: IntValue) {
-    let reg_s = self.compiler.module.get_global("sp").unwrap().as_pointer_value();
-    let s = self.builder.build_load(reg_s, "s").into_int_value();
-    let big_s = self.builder.build_int_z_extend(s, self.context.i16_type(), "big_s");
-    let mem_loc = self.builder.build_int_add(big_s, self.context.i16_type().const_int(0x100, false), "mem_loc");
-    self.write_mem(mem_loc, val);
-    let new_s = self.builder.build_int_add(s, self.context.i8_type().const_int(1, false), "new_s");
-    self.builder.build_store(reg_s, new_s);
+    let sp = self.builder.build_load(self.sp, "sp").into_int_value();
+    let ptr = unsafe {
+      self.builder.build_gep(self.stack, &[self.context.i8_type().const_zero(), sp], "ptr")
+    };
+    self.builder.build_store(ptr, val);
+    let new_sp = self.builder.build_int_add(sp, self.context.i8_type().const_int(1, false), "new_sp");
+    self.builder.build_store(self.sp, new_sp);
   }
 
   fn pop(&self) -> IntValue {
-    let reg_s = self.compiler.module.get_global("sp").unwrap().as_pointer_value();
-    let s = self.builder.build_load(reg_s, "s").into_int_value();
-    let new_s = self.builder.build_int_sub(s, self.context.i8_type().const_int(1, false), "new_s");
-    let big_s = self.builder.build_int_z_extend(new_s, self.context.i16_type(), "big_s");
-    self.builder.build_store(reg_s, new_s);
-    self.read_mem(big_s)
+    let sp = self.builder.build_load(self.sp, "sp").into_int_value();
+    let new_sp = self.builder.build_int_sub(sp, self.context.i8_type().const_int(1, false), "new_sp");
+    let ptr = unsafe {
+      self.builder.build_gep(self.stack, &[self.context.i8_type().const_zero(), new_sp], "ptr")
+    };
+    self.builder.build_store(self.sp, new_sp);
+    self.builder.build_load(ptr, "val").into_int_value()
   }
 
   fn read_mem(&self, addr: IntValue<'ctx>) -> IntValue<'ctx> {
