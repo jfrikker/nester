@@ -1,21 +1,16 @@
-use std::{ops::Index, fmt::{Debug, Display}, intrinsics::transmute, collections::BTreeMap};
+use crate::mapper::Mapper;
+use std::{fmt::{Debug, Display}, intrinsics::transmute, collections::BTreeMap};
 
-pub fn read_address(buf: &(impl Index<u16, Output=u8> + ?Sized), addr: u16) -> u16 {
-  let low = buf[addr];
-  let high = buf[addr + 1];
-  ((high as u16) << 8) + (low as u16)
+pub fn reset_address(buf: &(impl Mapper + ?Sized)) -> u16 {
+  buf.read_address(0xfffc)
 }
 
-pub fn reset_address(buf: &(impl Index<u16, Output=u8> + ?Sized)) -> u16 {
-  read_address(buf, 0xfffc)
+pub fn nmi_address(buf: &(impl Mapper + ?Sized)) -> u16 {
+  buf.read_address(0xfffa)
 }
 
-pub fn nmi_address(buf: &(impl Index<u16, Output=u8> + ?Sized)) -> u16 {
-  read_address(buf, 0xfffa)
-}
-
-pub fn irq_address(buf: &(impl Index<u16, Output=u8> + ?Sized)) -> u16 {
-  read_address(buf, 0xfffe)
+pub fn irq_address(buf: &(impl Mapper + ?Sized)) -> u16 {
+  buf.read_address(0xfffe)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -163,24 +158,24 @@ pub enum Instruction {
 }
 
 impl Instruction {
-  pub fn read(buf: &(impl Index<u16, Output=u8> + ?Sized), offset: u16) -> Self {
+  pub fn read(buf: &dyn Mapper, offset: u16) -> Self {
     let read_absolute = |opcode| 
       Instruction::Absolute {
         loc: offset,
         opcode,
-        addr: read_address(buf, offset + 1),
+        addr: buf.read_address(offset + 1),
       };
     let read_absolutex = |opcode| 
       Instruction::AbsoluteX {
         loc: offset,
         opcode,
-        addr: read_address(buf, offset + 1),
+        addr: buf.read_address(offset + 1),
       };
     let read_absolutey = |opcode| 
       Instruction::AbsoluteY {
         loc: offset,
         opcode,
-        addr: read_address(buf, offset + 1),
+        addr: buf.read_address(offset + 1),
       };
     let read_accumulator = |opcode| 
       Instruction::Accumulator {
@@ -191,7 +186,7 @@ impl Instruction {
       Instruction::Immediate {
         loc: offset,
         opcode,
-        val: (*buf)[offset + 1],
+        val: buf.read_static(offset + 1),
       };
     let read_implied = |opcode| 
       Instruction::Implied {
@@ -202,48 +197,48 @@ impl Instruction {
       Instruction::Indirect {
         loc: offset,
         opcode,
-        addr: read_address(buf, offset + 1),
+        addr: buf.read_address(offset + 1),
       };
     let read_indirectx = |opcode| 
       Instruction::IndirectX {
         loc: offset,
         opcode,
-        offset: (*buf)[offset + 1],
+        offset: buf.read_static(offset + 1),
       };
     let read_indirecty = |opcode| 
       Instruction::IndirectY {
         loc: offset,
         opcode,
-        offset: (*buf)[offset + 1],
+        offset: buf.read_static(offset + 1),
       };
     let read_relative = |opcode| 
       Instruction::Relative {
         loc: offset,
         opcode,
         offset: unsafe {
-          transmute((*buf)[offset + 1])
+          transmute(buf.read_static(offset + 1))
         },
       };
     let read_zeropage = |opcode| 
       Instruction::Zeropage {
         loc: offset,
         opcode,
-        addr: (*buf)[offset + 1],
+        addr: buf.read_static(offset + 1),
       };
     let read_zeropagex = |opcode| 
       Instruction::ZeropageX {
         loc: offset,
         opcode,
-        addr: (*buf)[offset + 1],
+        addr: buf.read_static(offset + 1),
       };
     let read_zeropagey = |opcode| 
       Instruction::ZeropageY {
         loc: offset,
         opcode,
-        addr: (*buf)[offset + 1],
+        addr: buf.read_static(offset + 1),
       };
 
-    match buf[offset] {
+    match buf.read_static(offset) {
       0x00 => read_implied(Opcode::BRK),
       0x01 => read_indirectx(Opcode::ORA),
       0x05 => read_zeropage(Opcode::ORA),
@@ -487,7 +482,7 @@ impl Display for Instruction {
       Instruction::Indirect{opcode, addr, ..} => write!(f, "{} (${:04x})", opcode, addr),
       Instruction::IndirectX{opcode, offset, ..} => write!(f, "{} (${:02x},X)", opcode, offset),
       Instruction::IndirectY{opcode, offset, ..} => write!(f, "{} (${:02x}),Y", opcode, offset),
-      Instruction::Relative{loc, opcode, offset, ..} => write!(f, "{} ({:02x})", opcode, ((*loc as i32) + 2 + (*offset as i32)) as u16),
+      Instruction::Relative{loc, opcode, offset, ..} => write!(f, "{} ({:04x})", opcode, ((*loc as i32) + 2 + (*offset as i32)) as u16),
       Instruction::Unknown{opcode, ..} => write!(f, "!Unknown {:02x}", opcode),
       Instruction::Zeropage{opcode, addr, ..} => write!(f, "{} ${:02x}", opcode, addr),
       Instruction::ZeropageX{opcode, addr, ..} => write!(f, "{} ${:02x},X", opcode, addr),

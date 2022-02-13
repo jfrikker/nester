@@ -1,18 +1,18 @@
-use std::{ops::Index, mem::swap};
+use std::{mem::swap};
 
-use crate::assembly::{Instruction, Opcode, function_bodies_with_parser, Functions, Instructions, read_address, nmi_address, irq_address, reset_address};
+use crate::{assembly::{Instruction, Opcode, function_bodies_with_parser, Functions, Instructions, nmi_address, irq_address, reset_address}, mapper::Mapper};
 
 pub trait Parser {
-  fn read_instruction(&self, buf: &dyn Index<u16, Output=u8>, addr: u16) -> Instruction;
+  fn read_instruction(&self, buf: &dyn Mapper, addr: u16) -> Instruction;
   fn post_process(&self, roots: &[u16], functions: &mut Functions);
 
-  fn parse_roots(&self, buf: &dyn Index<u16, Output=u8>, roots: &[u16]) -> Functions {
+  fn parse_roots(&self, buf: &dyn Mapper, roots: &[u16]) -> Functions {
     let mut funcs = function_bodies_with_parser(|addr| self.read_instruction(buf, addr), roots);
     self.post_process(roots, &mut funcs);
     funcs
   }
 
-  fn parse(&self, buf: &dyn Index<u16, Output=u8>) -> Functions {
+  fn parse(&self, buf: &dyn Mapper) -> Functions {
     self.parse_roots(buf, &[reset_address(buf), nmi_address(buf), irq_address(buf)])
   }
 }
@@ -20,7 +20,7 @@ pub trait Parser {
 pub struct BaseParser;
 
 impl Parser for BaseParser {
-    fn read_instruction(&self, buf: &dyn Index<u16, Output=u8>, addr: u16) -> Instruction {
+    fn read_instruction(&self, buf: &dyn Mapper, addr: u16) -> Instruction {
         Instruction::read(buf, addr)
     }
 
@@ -44,7 +44,7 @@ impl SelfLoopPass {
 }
 
 impl Parser for SelfLoopPass {
-  fn read_instruction(&self, buf: &dyn Index<u16, Output=u8>, addr: u16) -> Instruction {
+  fn read_instruction(&self, buf: &dyn Mapper, addr: u16) -> Instruction {
       match self.inner.read_instruction(buf, addr) {
         Instruction::Absolute{loc, opcode: Opcode::JMP, addr} if loc == addr => 
           Instruction::Implied{ loc, opcode: Opcode::SLP},
@@ -74,12 +74,12 @@ impl SmbSwitchPass {
 }
 
 impl Parser for SmbSwitchPass {
-  fn read_instruction(&self, buf: &dyn Index<u16, Output=u8>, addr: u16) -> Instruction {
+  fn read_instruction(&self, buf: &dyn Mapper, addr: u16) -> Instruction {
     match self.inner.read_instruction(buf, addr) {
       Instruction::Absolute{opcode: Opcode::JSR, addr: 0x8e04, ..} => {
         let mut targets = vec!();
         for i in 0.. {
-          let target = read_address(buf, addr + 3 + (2 * i));
+          let target = buf.read_address(addr + 3 + (2 * i));
           if target < 0x8000 {
             break;
           }

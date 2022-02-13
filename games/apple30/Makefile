@@ -1,25 +1,19 @@
 .PHONY: clean
 
-game: game.o
+game: game.o mapper.o
 	gcc -o $@ $^
 
-game.o: game-opt.ll
+game.o: game.ll
 	llc -O3 -filetype=obj -o $@ $^
 
-game.ll: game-part.ll mapper.ll
-	llvm-link -o $@ $^
+mapper.o: ../../hardware/apple.c
+	clang -O3 -c -o $@ $^
 
-mapper.ll: ../../hardware/apple.c
-	clang -O3 -emit-llvm -S -o $@ $^
-
-game-part.ll: apple30th.bin
-	nester llvm --format apple $^ $@
-
-game-opt.ll: game.ll
-	opt -O3 $^ -o $@
+game.ll: apple30th.bin
+	nester llvm -O -m apple $^ $@
 
 game.as: apple30th.bin
-	nester disassemble --format apple $^ $@
+	nester disassemble -m apple $^ $@
 
 clean:
 	rm -f *.ll *.as *.hi *.o *.a game

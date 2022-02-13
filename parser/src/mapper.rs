@@ -1,54 +1,30 @@
-use std::ops::Index;
+use inkwell::{context::Context, module::{Module, Linkage}};
 
-use nom::{IResult, bytes::complete::take};
+pub trait Mapper {
+  fn read_static(&self, addr: u16) -> u8;
 
-pub struct Mapper0<'a> {
-  prg_rom: &'a [u8],
-  chr_rom: &'a [u8],
-}
-
-impl <'a> Mapper0<'a> {
-  pub fn read(contents: &'a [u8]) -> IResult<&'a[u8], Self> {
-    let (contents, _) = take(4usize)(contents)?;
-    let (contents, prg_size) = nom::number::complete::u8(contents)?;
-    let (contents, chr_size) = nom::number::complete::u8(contents)?;
-    let (contents, _) = take(10usize)(contents)?;
-    let (contents, prg_rom) = take((prg_size as usize) * 16384)(contents)?;
-    let (contents, chr_rom) = take((chr_size as usize) * 8192)(contents)?;
-    Ok((contents,
-      Self {
-      prg_rom,
-      chr_rom
-    }))
+  fn read_address(&self, addr: u16) -> u16 {
+    let low = self.read_static(addr);
+    let high = self.read_static(addr + 1);
+    ((high as u16) << 8) + (low as u16)
   }
 
-  pub fn prg_rom(&self) -> Mapper0PrgRom<'a> {
-    Mapper0PrgRom {
-      prg_rom: self.prg_rom
-    }
-  }
+  fn add_globals<'ctx>(&self, context: &'ctx Context, module: &Module<'ctx>);
 }
 
-pub struct Mapper0PrgRom<'a> {
-  prg_rom: &'a [u8],
+pub fn add_rom<'ctx>(rom: &[u8], name: &str, context: &'ctx Context, module: &Module<'ctx>) {
+  let glob = module.add_global(context.i8_type().array_type(0x8000), None, name);
+  glob.set_linkage(Linkage::Private);
+  glob.set_constant(true);
+  glob.set_initializer(&context.i8_type().const_array(&rom.iter()
+    .map(|b| context.i8_type().const_int(*b as u64, false))
+    .collect::<Vec<_>>()));
 }
 
-impl <'a> Mapper0PrgRom<'a> {
-  pub fn as_bytes(&self) -> &[u8] {
-    self.prg_rom
-  }
-}
-
-impl <'a> Index<u16> for Mapper0PrgRom<'a> {
-  type Output = u8;
-
-  fn index(&self, index: u16) -> &Self::Output {
-    let index = index as usize;
-    let start = 0xFFFF - (self.prg_rom.len() as usize) + 1;
-    if index < start {
-      &0
-    } else {
-      &self.prg_rom[index - start]
-    }
-  }
+pub fn add_ram<'ctx>(len: usize, name: &str, context: &'ctx Context, module: &Module<'ctx>) {
+  let glob = module.add_global(context.i8_type().array_type(len as u32), None, name);
+  glob.set_initializer(&context.i8_type().const_array(&(0..len).into_iter()
+    .map(|_| context.i8_type().const_zero())
+    .collect::<Vec<_>>()));
+  glob.set_linkage(Linkage::Private)
 }

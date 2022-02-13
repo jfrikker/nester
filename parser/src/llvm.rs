@@ -4,13 +4,14 @@ use inkwell::{module::{Module, Linkage}, context::Context, values::{FunctionValu
 
 use crate::{assembly::{Instruction, Opcode}};
 
-const INACCESSIBLE_MEM_ONLY: u32 = 9;
-const NO_ALIAS: u32 = 16;
-const NO_CAPTURE: u32 = 18;
-const NO_UNWIND: u32 = 30;
-const READ_ONLY: u32 = 38;
-const SRET: u32 = 55;
-const WILL_RETURN: u32 = 59;
+pub const INACCESSIBLE_MEM_ONLY: u32 = 9;
+pub const NO_ALIAS: u32 = 16;
+pub const NO_CAPTURE: u32 = 18;
+pub const NO_UNWIND: u32 = 30;
+pub const READ_ONLY: u32 = 38;
+pub const SRET: u32 = 55;
+pub const WILL_RETURN: u32 = 59;
+pub const ZERO_EXT: u32 = 61;
 
 pub struct Compiler<'a, 'ctx> {
   context: &'ctx Context,
@@ -25,14 +26,6 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
       builder: context.create_builder(),
       module,
     };
-    let glob = module.add_global(context.i8_type().array_type(0x8000), None, "prgRom");
-    glob.set_linkage(Linkage::Private);
-    glob.set_constant(true);
-
-    result.add_ram("lowMem", 0x800);
-    result.add_ram("highMem", 0x4000);
-    result.add_read_mem_decl();
-    result.add_write_mem_decl();
     result.add_uadd_carry_decl();
     result.add_sadd_carry_decl();
     result.add_usub_carry_decl();
@@ -41,121 +34,6 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     sp.set_initializer(&result.context.i8_type().const_zero());
     sp.set_linkage(Linkage::Private);
     result
-  }
-
-  fn add_read_mem_decl(&self) {
-    let i8_ty = self.context.i8_type();
-    let i16_ty = self.context.i16_type();
-    let fn_type = i8_ty.fn_type(&[i16_ty.into()], false);
-    let read_mem_external = self.module.add_function("readMemExternal", fn_type, None);
-    let inaccessible_mem_only = self.context.create_enum_attribute(INACCESSIBLE_MEM_ONLY, 0);
-    let no_unwind = self.context.create_enum_attribute(NO_UNWIND, 0);
-    let will_return = self.context.create_enum_attribute(WILL_RETURN, 0);
-    read_mem_external.add_attribute(AttributeLoc::Function, inaccessible_mem_only);
-    read_mem_external.add_attribute(AttributeLoc::Function, no_unwind);
-    read_mem_external.add_attribute(AttributeLoc::Function, will_return);
-
-    let read_mem = self.module.add_function("readMem", fn_type, None);
-    read_mem.set_linkage(Linkage::Private);
-    let entry = self.context.append_basic_block(read_mem, "entry");
-    let if_low = self.context.append_basic_block(read_mem, "if_low");
-    let else_low = self.context.append_basic_block(read_mem, "else_low");
-    let if_external = self.context.append_basic_block(read_mem, "if_external");
-    let else_external = self.context.append_basic_block(read_mem, "else_external");
-    let if_high = self.context.append_basic_block(read_mem, "if_high");
-    let else_high = self.context.append_basic_block(read_mem, "else_high");
-
-    let addr = read_mem.get_nth_param(0).unwrap().into_int_value();
-    self.builder.position_at_end(entry);
-    let cond = self.builder.build_int_compare(IntPredicate::ULT, addr, i16_ty.const_int(0x2000, false), "cond");
-    self.builder.build_conditional_branch(cond, if_low, else_low);
-
-    self.builder.position_at_end(if_low);
-    let addr2 = self.builder.build_int_unsigned_rem(addr, i16_ty.const_int(0x800, false), "addr");
-    let ptr = unsafe {
-      self.builder.build_gep(self.module.get_global("lowMem").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
-    };
-    let val = self.builder.build_load(ptr, "val");
-    self.builder.build_return(Some(&val));
-
-    self.builder.position_at_end(else_low);
-    let cond = self.builder.build_int_compare(IntPredicate::ULT, addr, i16_ty.const_int(0x4020, false), "cond");
-    self.builder.build_conditional_branch(cond, if_external, else_external);
-
-    self.builder.position_at_end(if_external);
-    let val = self.builder.build_call(read_mem_external, &[addr.into()], "val").try_as_basic_value().unwrap_left();
-    self.builder.build_return(Some(&val));
-
-    self.builder.position_at_end(else_external);
-    let cond = self.builder.build_int_compare(IntPredicate::ULT, addr, i16_ty.const_int(0x8000, false), "cond");
-    self.builder.build_conditional_branch(cond, if_high, else_high);
-
-    self.builder.position_at_end(if_high);
-    let addr2 = self.builder.build_int_sub(addr, i16_ty.const_int(0x4000, false), "addr");
-    let ptr = unsafe {
-      self.builder.build_gep(self.module.get_global("highMem").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
-    };
-    let val = self.builder.build_load(ptr, "val");
-    self.builder.build_return(Some(&val));
-
-    self.builder.position_at_end(else_high);
-    let addr2 = self.builder.build_int_sub(addr, i16_ty.const_int(0x8000, false), "addr");
-    let ptr = unsafe {
-      self.builder.build_gep(self.module.get_global("prgRom").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
-    };
-    let val = self.builder.build_load(ptr, "val");
-    self.builder.build_return(Some(&val));
-  }
-  
-  fn add_write_mem_decl(&self) {
-    let i8_ty = self.context.i8_type();
-    let i16_ty = self.context.i16_type();
-    let fn_type = self.context.void_type().fn_type(&[i16_ty.into(), i8_ty.into()], false);
-    let write_mem_external = self.module.add_function("writeMemExternal", fn_type, None);
-    let inaccessible_mem_only = self.context.create_enum_attribute(INACCESSIBLE_MEM_ONLY, 0);
-    let no_unwind = self.context.create_enum_attribute(NO_UNWIND, 0);
-    let will_return = self.context.create_enum_attribute(WILL_RETURN, 0);
-    write_mem_external.add_attribute(AttributeLoc::Function, inaccessible_mem_only);
-    write_mem_external.add_attribute(AttributeLoc::Function, no_unwind);
-    write_mem_external.add_attribute(AttributeLoc::Function, will_return);
-
-    let write_mem = self.module.add_function("writeMem", fn_type, None);
-    write_mem.set_linkage(Linkage::Private);
-    let entry = self.context.append_basic_block(write_mem, "entry");
-    let if_low = self.context.append_basic_block(write_mem, "if_low");
-    let else_low = self.context.append_basic_block(write_mem, "else_low");
-    let if_external = self.context.append_basic_block(write_mem, "if_external");
-    let else_external = self.context.append_basic_block(write_mem, "else_external");
-
-    let addr = write_mem.get_nth_param(0).unwrap().into_int_value();
-    let val = write_mem.get_nth_param(1).unwrap().into_int_value();
-    self.builder.position_at_end(entry);
-    let cond = self.builder.build_int_compare(IntPredicate::ULT, addr, i16_ty.const_int(0x2000, false), "cond");
-    self.builder.build_conditional_branch(cond, if_low, else_low);
-
-    self.builder.position_at_end(if_low);
-    let addr2 = self.builder.build_int_unsigned_rem(addr, i16_ty.const_int(0x800, false), "addr");
-    let ptr = unsafe {
-      self.builder.build_gep(self.module.get_global("lowMem").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
-    };
-    self.builder.build_store(ptr, val);
-    self.builder.build_return(None);
-
-    self.builder.position_at_end(else_low);
-    let cond = self.builder.build_int_compare(IntPredicate::ULT, addr, i16_ty.const_int(0x4020, false), "cond");
-    self.builder.build_conditional_branch(cond, if_external, else_external);
-
-    self.builder.position_at_end(if_external);
-    self.builder.build_call(write_mem_external, &[addr.into(), val.into()], "val");
-    self.builder.build_return(None);
-
-    self.builder.position_at_end(else_external);
-    let addr2 = self.builder.build_int_sub(addr, i16_ty.const_int(0x4000, false), "addr");
-    let ptr = unsafe {
-      self.builder.build_gep(self.module.get_global("highMem").unwrap().as_pointer_value(), &[i16_ty.const_zero(), addr2], "ptr")
-    };
-    self.builder.build_store(ptr, val);
-    self.builder.build_return(None);
   }
   
   fn add_uadd_carry_decl(&self) {
@@ -188,21 +66,6 @@ impl <'a, 'ctx> Compiler<'a, 'ctx> {
     let result_type = self.context.struct_type(&[i8_ty, i1_ty], false);
     let fn_type = result_type.fn_type(&[i8_ty.into(), i8_ty.into()], false);
     self.module.add_function("llvm.ssub.with.overflow.i8", fn_type, None);
-  }
-
-  pub fn set_prg_rom(&self, rom: &[u8]) {
-    let glob = self.module.get_global("prgRom").unwrap();
-    glob.set_initializer(&self.context.i8_type().const_array(&rom.iter()
-      .map(|b| self.context.i8_type().const_int(*b as u64, false))
-      .collect::<Vec<_>>()));
-  }
-
-  fn add_ram(&self, name: &str, len: u32) {
-    let glob = self.module.add_global(self.context.i8_type().array_type(len as u32), None, name);
-    glob.set_initializer(&self.context.i8_type().const_array(&(0..len).into_iter()
-      .map(|_| self.context.i8_type().const_zero())
-      .collect::<Vec<_>>()));
-    glob.set_linkage(Linkage::Private)
   }
 
   pub fn declare_func(&mut self, addr: u16) {
@@ -1020,7 +883,6 @@ impl <'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
     self.builder.build_store(self.reg_v, new_v_trunc);
     let a = self.builder.build_load(self.reg_a, "a").into_int_value();
     let res = self.builder.build_and(a, arg, "res");
-    self.builder.build_store(self.reg_a, res);
     self.set_z(res);
   }
 
