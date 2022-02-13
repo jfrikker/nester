@@ -17,6 +17,7 @@ pub fn irq_address(buf: &(impl Mapper + ?Sized)) -> u16 {
     buf.read_address(0xfffe)
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug)]
 pub enum Opcode {
     ADC,

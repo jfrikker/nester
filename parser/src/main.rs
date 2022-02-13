@@ -95,7 +95,7 @@ fn disassemble(input: PathBuf, output: PathBuf, mapper_id: MapperId) -> anyhow::
     let parser = SelfLoopPass::with_inner(SmbSwitchPass::with_inner(BaseParser));
     let functions = parser.parse(mapper.as_ref());
     for (offset, body) in functions {
-        writeln!(output, "")?;
+        writeln!(output)?;
         writeln!(output, "{:04x}:", offset)?;
         for (offset, inst) in body {
             writeln!(output, "{:04x}: {}", offset, inst)?;

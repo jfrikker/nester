@@ -278,6 +278,7 @@ impl<'a, 'b, 'ctx> FunctionCompiler<'a, 'b, 'ctx> {
         }
     }
 
+    #[allow(clippy::many_single_char_names)]
     fn write_instruction(&self, inst: &Instruction) {
         match inst {
             Instruction::Absolute {

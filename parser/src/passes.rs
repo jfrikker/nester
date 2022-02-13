@@ -161,13 +161,11 @@ impl Parser for SmbSwitchPass {
 fn is_code(funcs: &Functions, addr: u16) -> bool {
     funcs
         .values()
-        .filter(|insts| {
+        .any(|insts| {
             insts
                 .range(0..=addr)
                 .next_back()
                 .filter(|(_, floor)| addr < floor.next_addr())
                 .is_some()
         })
-        .next()
-        .is_some()
 }
